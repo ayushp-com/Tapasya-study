@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Check, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -19,6 +18,77 @@ const exams = [
   "Other",
 ];
 
+const EXAM_DEFAULT_SUBJECTS: Record<
+  string,
+  { name: string; color: string; targetHours: number }[]
+> = {
+  JEE: [
+    { name: "PHYSICS", color: "#2196F3", targetHours: 1 },
+    { name: "CHEMISTRY", color: "#22C55E", targetHours: 1 },
+    { name: "MATHEMATICS", color: "#FF7628", targetHours: 2 },
+  ],
+  NEET: [
+    { name: "PHYSICS", color: "#2196F3", targetHours: 1 },
+    { name: "CHEMISTRY", color: "#22C55E", targetHours: 1 },
+    { name: "BIOLOGY", color: "#A78BFA", targetHours: 2 },
+  ],
+  UPSC: [
+    { name: "POLITY", color: "#2196F3", targetHours: 1 },
+    { name: "HISTORY", color: "#F59E0B", targetHours: 1 },
+    { name: "GEOGRAPHY", color: "#22C55E", targetHours: 1 },
+    { name: "ECONOMY", color: "#A78BFA", targetHours: 1 },
+    { name: "ENVIRONMENT", color: "#14B8A6", targetHours: 1 },
+    { name: "CURRENT AFFAIRS", color: "#EC4899", targetHours: 1 },
+  ],
+  GATE: [
+    { name: "ENGINEERING MATHEMATICS", color: "#2196F3", targetHours: 1 },
+    { name: "GENERAL APTITUDE", color: "#22C55E", targetHours: 1 },
+    { name: "CORE SUBJECT", color: "#FF7628", targetHours: 2 },
+  ],
+  CAT: [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "VARC", color: "#22C55E", targetHours: 1 },
+    { name: "DILR", color: "#FF7628", targetHours: 1 },
+  ],
+  CUET: [
+    { name: "LANGUAGE", color: "#2196F3", targetHours: 1 },
+    { name: "DOMAIN SUBJECTS", color: "#22C55E", targetHours: 2 },
+    { name: "GENERAL TEST", color: "#FF7628", targetHours: 1 },
+  ],
+  SSC: [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "REASONING", color: "#22C55E", targetHours: 1 },
+    { name: "ENGLISH", color: "#FF7628", targetHours: 1 },
+    { name: "GENERAL AWARENESS", color: "#A78BFA", targetHours: 1 },
+  ],
+  Banking: [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "REASONING", color: "#22C55E", targetHours: 1 },
+    { name: "ENGLISH", color: "#FF7628", targetHours: 1 },
+    { name: "BANKING AWARENESS", color: "#A78BFA", targetHours: 1 },
+  ],
+  "College / University": [
+    { name: "SUBJECT 1", color: "#2196F3", targetHours: 1 },
+    { name: "SUBJECT 2", color: "#22C55E", targetHours: 1 },
+    { name: "SUBJECT 3", color: "#FF7628", targetHours: 1 },
+  ],
+  Other: [
+    { name: "SUBJECT 1", color: "#2196F3", targetHours: 1 },
+    { name: "SUBJECT 2", color: "#22C55E", targetHours: 1 },
+    { name: "SUBJECT 3", color: "#FF7628", targetHours: 1 },
+  ],
+};
+
+function getDefaultSubjects(exam: string) {
+  return (EXAM_DEFAULT_SUBJECTS[exam] ?? EXAM_DEFAULT_SUBJECTS.Other).map(
+    (subject, index) => ({
+      id: index + 1,
+      ...subject,
+      seconds: 0,
+    })
+  );
+}
+
 export default function ProfileSetupPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -33,6 +103,11 @@ export default function ProfileSetupPage() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const suggestedSubjects = useMemo(
+    () => (exam ? getDefaultSubjects(exam) : []),
+    [exam]
+  );
 
   useEffect(() => {
     async function loadUser() {
@@ -73,7 +148,7 @@ export default function ProfileSetupPage() {
       }
     }
 
-    loadUser();
+    void loadUser();
   }, [router, supabase]);
 
   useEffect(() => {
@@ -155,6 +230,8 @@ export default function ProfileSetupPage() {
       return;
     }
 
+    const defaultSubjects = getDefaultSubjects(exam);
+
     const { error: saveError } = await supabase
       .from("profiles")
       .upsert(
@@ -164,6 +241,7 @@ export default function ProfileSetupPage() {
           display_name: displayName.trim(),
           exam,
           age: numericAge,
+          subjects: defaultSubjects,
         },
         { onConflict: "id" }
       );
@@ -187,9 +265,7 @@ export default function ProfileSetupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#111111] px-5 py-12 text-[#e5e5e5]">
       <section className="w-full max-w-[390px]">
-        <p className="text-[13px] font-medium text-[#999999]">
-          TAPASYA
-        </p>
+        <p className="text-[13px] font-medium text-[#999999]">TAPASYA</p>
 
         <h1 className="mt-3 text-[27px] font-semibold tracking-tight">
           Set up your profile
@@ -222,7 +298,9 @@ export default function ProfileSetupPage() {
             <div className="relative">
               <input
                 value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                onChange={(e) =>
+                  setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))
+                }
                 required
                 minLength={3}
                 maxLength={20}
@@ -278,6 +356,27 @@ export default function ProfileSetupPage() {
                 </option>
               ))}
             </select>
+
+            {suggestedSubjects.length > 0 && (
+              <div className="mt-3 rounded-md border border-[#303030] bg-[#191919] p-3">
+                <p className="text-[10px] font-medium tracking-wide text-[#888888]">
+                  YOUR STARTER SUBJECTS
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {suggestedSubjects.map((subject) => (
+                    <span
+                      key={subject.name}
+                      className="rounded-full border border-[#383838] px-2.5 py-1 text-[10px] text-[#d0d0d0]"
+                    >
+                      {subject.name}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-[#777777]">
+                  You can add, rename or remove subjects from your dashboard anytime.
+                </p>
+              </div>
+            )}
           </div>
 
           <div>

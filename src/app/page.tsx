@@ -49,6 +49,72 @@ const INITIAL_SUBJECTS: Subject[] = [
   { id: 3, name: "MATHS", color: "#FF7628", seconds: 0, targetHours: 2 },
 ];
 
+const EXAM_DEFAULT_SUBJECTS: Record<string, { name: string; color: string; targetHours: number }[]> = {
+  "JEE": [
+    { name: "PHYSICS", color: "#2196F3", targetHours: 1 },
+    { name: "CHEMISTRY", color: "#22C55E", targetHours: 1 },
+    { name: "MATHEMATICS", color: "#FF7628", targetHours: 2 },
+  ],
+  "NEET": [
+    { name: "PHYSICS", color: "#2196F3", targetHours: 1 },
+    { name: "CHEMISTRY", color: "#22C55E", targetHours: 1 },
+    { name: "BIOLOGY", color: "#A78BFA", targetHours: 2 },
+  ],
+  "UPSC": [
+    { name: "POLITY", color: "#2196F3", targetHours: 1 },
+    { name: "HISTORY", color: "#F59E0B", targetHours: 1 },
+    { name: "GEOGRAPHY", color: "#22C55E", targetHours: 1 },
+    { name: "ECONOMY", color: "#A78BFA", targetHours: 1 },
+    { name: "ENVIRONMENT", color: "#14B8A6", targetHours: 1 },
+    { name: "CURRENT AFFAIRS", color: "#EC4899", targetHours: 1 },
+  ],
+  "GATE": [
+    { name: "ENGINEERING MATHEMATICS", color: "#2196F3", targetHours: 1 },
+    { name: "GENERAL APTITUDE", color: "#22C55E", targetHours: 1 },
+    { name: "CORE SUBJECT", color: "#FF7628", targetHours: 2 },
+  ],
+  "CAT": [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "VARC", color: "#22C55E", targetHours: 1 },
+    { name: "DILR", color: "#FF7628", targetHours: 1 },
+  ],
+  "CUET": [
+    { name: "LANGUAGE", color: "#2196F3", targetHours: 1 },
+    { name: "DOMAIN SUBJECTS", color: "#22C55E", targetHours: 2 },
+    { name: "GENERAL TEST", color: "#FF7628", targetHours: 1 },
+  ],
+  "SSC": [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "REASONING", color: "#22C55E", targetHours: 1 },
+    { name: "ENGLISH", color: "#FF7628", targetHours: 1 },
+    { name: "GENERAL AWARENESS", color: "#A78BFA", targetHours: 1 },
+  ],
+  "Banking": [
+    { name: "QUANTITATIVE APTITUDE", color: "#2196F3", targetHours: 1 },
+    { name: "REASONING", color: "#22C55E", targetHours: 1 },
+    { name: "ENGLISH", color: "#FF7628", targetHours: 1 },
+    { name: "BANKING AWARENESS", color: "#A78BFA", targetHours: 1 },
+  ],
+  "College / University": [
+    { name: "SUBJECT 1", color: "#2196F3", targetHours: 1 },
+    { name: "SUBJECT 2", color: "#22C55E", targetHours: 1 },
+    { name: "SUBJECT 3", color: "#FF7628", targetHours: 1 },
+  ],
+  "Other": [
+    { name: "SUBJECT 1", color: "#2196F3", targetHours: 1 },
+    { name: "SUBJECT 2", color: "#22C55E", targetHours: 1 },
+    { name: "SUBJECT 3", color: "#FF7628", targetHours: 1 },
+  ],
+};
+
+function createDefaultSubjects(exam: string): Subject[] {
+  return (EXAM_DEFAULT_SUBJECTS[exam] ?? EXAM_DEFAULT_SUBJECTS.Other).map((subject, index) => ({
+    id: index + 1,
+    ...subject,
+    seconds: 0,
+  }));
+}
+
 const dateKey = (date: Date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -617,6 +683,8 @@ function drawShareCard(input: ShareCardInput): HTMLCanvasElement | null {
 
 export default function Home() {
   const [subjects, setSubjects] = useState<Subject[]>(INITIAL_SUBJECTS);
+  const [subjectsLoaded, setSubjectsLoaded] = useState(false);
+  const savedSubjectConfigRef = useRef("");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeSubject, setActiveSubject] = useState<number | null>(null);
   const [activeSessionStartedAt, setActiveSessionStartedAt] = useState<string | null>(null);
@@ -720,29 +788,75 @@ export default function Home() {
     };
   }, []);
 
-  // Load the signed-in user's identity for the profile menu.
+  // Load profile identity and exam-based subjects from Supabase.
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
 
-    const loadProfileIdentity = async () => {
+    const loadProfile = async () => {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user || cancelled) return;
 
-      setProfileEmail(data.user.email ?? "");
+      const user = data.user;
+      setProfileEmail(user.email ?? "");
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("username")
-        .eq("id", data.user.id)
+        .select("username, exam, subjects")
+        .eq("id", user.id)
         .maybeSingle();
 
-      if (!cancelled) {
-        setProfileUsername(profile?.username || data.user.user_metadata?.username || "Student");
+      if (cancelled) return;
+      if (profileError) console.error("Could not load profile subjects:", profileError);
+      setProfileUsername(profile?.username || user.user_metadata?.username || "Student");
+
+      try {
+        const savedSubjectsRaw = localStorage.getItem("tapasya-subjects");
+        const savedSubjects = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : null;
+        const localList = Array.isArray(savedSubjects) ? savedSubjects : [];
+        const remoteList = Array.isArray(profile?.subjects) ? profile.subjects : [];
+
+        const normalize = (items: any[]): Subject[] => items
+          .filter(item => item && typeof item.name === "string" && item.name.trim())
+          .map((item, index) => ({
+            id: Number(item.id) || index + 1,
+            name: item.name.trim(),
+            color: typeof item.color === "string" ? item.color : COLORS[index % COLORS.length],
+            seconds: Math.max(0, Number(item.seconds) || 0),
+            targetHours: Math.max(0, Number(item.targetHours) || 1),
+          }));
+
+        let chosen: Subject[];
+        if (remoteList.length > 0) {
+          const localByName = new Map<string, Subject>(normalize(localList).map(item => [item.name.toLowerCase(), item] as const));
+          chosen = normalize(remoteList).map((item, index) => {
+            const local = localByName.get(item.name.toLowerCase());
+            return { ...item, id: item.id || local?.id || index + 1, seconds: local?.seconds ?? item.seconds };
+          });
+        } else {
+          const oldDefault = localList.length === 3 &&
+            ["PHYSICS", "CHEMISTRY", "MATHS"].every(name =>
+              localList.some((item: any) => String(item?.name || "").toUpperCase() === name)
+            );
+          chosen = localList.length > 0 && !oldDefault
+            ? normalize(localList)
+            : createDefaultSubjects(profile?.exam || "Other");
+        }
+
+        if (!cancelled) {
+          setSubjects(chosen);
+          setSubjectsLoaded(true);
+        }
+      } catch (loadError) {
+        console.error("Could not restore subjects:", loadError);
+        if (!cancelled) {
+          setSubjects(createDefaultSubjects(profile?.exam || "Other"));
+          setSubjectsLoaded(true);
+        }
       }
     };
 
-    void loadProfileIdentity();
+    void loadProfile();
     return () => { cancelled = true; };
   }, [authReady]);
 
@@ -779,19 +893,7 @@ export default function Home() {
     );
 
     try {
-      const savedSubjects = localStorage.getItem("tapasya-subjects");
       const savedTasks = localStorage.getItem("tapasya-tasks");
-
-      if (savedSubjects) {
-        const parsed = JSON.parse(savedSubjects);
-        if (Array.isArray(parsed)) {
-          setSubjects(parsed.map((s: Subject) => ({
-            ...s,
-            seconds: Number(s.seconds) || 0,
-            targetHours: Number(s.targetHours) || 0,
-          })));
-        }
-      }
 
       if (savedTasks) {
         const parsed = JSON.parse(savedTasks);
@@ -810,9 +912,33 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
-    localStorage.setItem("tapasya-subjects", JSON.stringify(subjects));
-  }, [subjects, ready]);
+    if (!ready || !subjectsLoaded || !authReady) return;
+
+    try {
+      localStorage.setItem("tapasya-subjects", JSON.stringify(subjects));
+    } catch (error) {
+      console.error("Could not save local subjects:", error);
+    }
+
+    // Save subject settings only; the timer ticks every second and should not cause DB writes.
+    const config = subjects.map(({ id, name, color, targetHours }) => ({ id, name, color, targetHours }));
+    const signature = JSON.stringify(config);
+    if (signature === savedSubjectConfigRef.current) return;
+    savedSubjectConfigRef.current = signature;
+
+    void (async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) return;
+      const { error } = await supabase
+        .from("profiles")
+        .update({ subjects: config })
+        .eq("id", authData.user.id);
+      if (error) {
+        console.error("Could not sync subjects to profile:", error);
+        savedSubjectConfigRef.current = "";
+      }
+    })();
+  }, [subjects, ready, subjectsLoaded, authReady]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1361,7 +1487,7 @@ export default function Home() {
     : [];
 
 
-  if (!authReady) {
+  if (!authReady || !subjectsLoaded) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#080808] text-[#888888]">
         <p className="text-sm">Loading Tapasya...</p>
