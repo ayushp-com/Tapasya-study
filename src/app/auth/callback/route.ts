@@ -17,12 +17,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Verify environment variables.
+  console.log("SUPABASE CALLBACK ENV CHECK:", {
+    hasUrl: Boolean(supabaseUrl),
+    hasKey: Boolean(supabaseKey),
+  });
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("Supabase environment variables are missing.");
+
+    return NextResponse.redirect(
+      new URL("/auth?error=server_config", origin)
+    );
+  }
+
   // Create response to preserve Supabase session cookies.
   const response = NextResponse.redirect(new URL("/", origin));
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -71,7 +88,6 @@ export async function GET(request: NextRequest) {
     error: profileError?.message ?? null,
   });
 
-  // Show the actual database error for debugging.
   if (profileError) {
     console.error("PROFILE ERROR DETAILS:", {
       message: profileError.message,
@@ -80,15 +96,12 @@ export async function GET(request: NextRequest) {
       hint: profileError.hint,
     });
 
-    return NextResponse.json(
-      {
-        message: profileError.message,
-        code: profileError.code,
-        details: profileError.details,
-        hint: profileError.hint,
-      },
-      { status: 500 }
+    response.headers.set(
+      "Location",
+      new URL("/auth?error=profile", origin).toString()
     );
+
+    return response;
   }
 
   // Check onboarding completion.
@@ -105,7 +118,7 @@ export async function GET(request: NextRequest) {
   console.log("REDIRECTING TO:", destination);
   console.log("===================================");
 
-  // Preserve cookies and redirect.
+  // Preserve session cookies and redirect.
   response.headers.set(
     "Location",
     new URL(destination, origin).toString()
