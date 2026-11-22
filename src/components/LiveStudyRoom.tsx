@@ -38,20 +38,15 @@ function Lamp({ active }: { active: boolean }) {
   );
 }
 
-export default function LiveStudyRoom({ activeSubjectName, onPause }: { activeSubjectName: string | null; onPause: () => void }) {
+export default function LiveStudyRoom({ activeSubjectName, studyStartedAt, onPause }: { activeSubjectName: string | null; studyStartedAt: string | null; onPause: () => void }) {
   const [students, setStudents] = useState<PresenceStudent[]>([]);
   const [myGroups, setMyGroups] = useState<StudyGroup[]>([]);
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [view, setView] = useState<"global" | "groups">("global");
   const [currentUserId, setCurrentUserId] = useState("");
-  const [studyStartedAt, setStudyStartedAt] = useState<string | null>(null);
   const [clockNow, setClockNow] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setStudyStartedAt(activeSubjectName ? new Date().toISOString() : null);
-  }, [activeSubjectName]);
 
   const loadMyGroups = useCallback(async (userId: string) => {
     const { data: memberships, error: membershipError } = await supabase
@@ -235,7 +230,7 @@ export default function LiveStudyRoom({ activeSubjectName, onPause }: { activeSu
       ) : (
         <div className="mt-4 grid grid-cols-3 gap-x-2 gap-y-5 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9">
           {visibleStudents.map(student => {
-            const elapsed = student.studying && student.studyStartedAt ? Math.floor((clockNow - new Date(student.studyStartedAt).getTime()) / 1000) : 0;
+            const elapsed = student.studying && student.studyStartedAt ? Math.max(0, Math.floor((clockNow - new Date(student.studyStartedAt).getTime()) / 1000)) : 0;
             const mine = student.userId === currentUserId;
             return (
               <div key={student.userId} className={`flex min-w-0 flex-col items-center rounded-lg px-1 py-2 text-center ${mine ? "border border-[#4a3325] bg-[#1c1713]" : "border border-transparent"}`}>

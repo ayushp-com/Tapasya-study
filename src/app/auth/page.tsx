@@ -461,18 +461,57 @@ export default function AuthPage() {
               </p>
 
               <div className="mt-10 flex w-full max-w-[360px] flex-col gap-2.5">
+                {/* GOOGLE SIGN UP */}
                 <button
-                  onClick={() => openMethods("signup")}
-                  className="h-[48px] rounded-[7px] bg-[#ff7628] text-[13px] font-semibold text-white transition hover:bg-[#f5681b]"
+                  onClick={() => {
+                    setMode("signup");
+                    signInWithGoogle();
+                  }}
+                  disabled={loading}
+                  className="relative flex h-[48px] items-center justify-center rounded-[7px] border border-[#292929] text-[13px] font-medium text-[#cfcfcf] transition hover:bg-[#1c1c1c] disabled:opacity-50"
                 >
-                  Get started <span className="ml-2">→</span>
+                  <span className="absolute left-5">
+                    <GoogleIcon />
+                  </span>
+                  Sign up with Google
                 </button>
-                <button
-                  onClick={() => openMethods("signin")}
-                  className="h-[46px] rounded-[7px] border border-[#38332e] bg-transparent text-[13px] font-semibold text-[#d5cec5] transition hover:border-[#765039] hover:bg-[#191715]"
+
+                {/* EMAIL SIGN UP */}
+                {/* <button
+                  onClick={() => {
+                    setMode("signup");
+                    setScreen("email");
+                    clearMessages();
+                  }}
+                  className="relative flex h-[46px] items-center justify-center rounded-[7px] border border-[#292929] text-[13px] font-medium text-[#cfcfcf] transition hover:bg-[#1c1c1c]"
                 >
-                  I already have an account
-                </button>
+                  <Mail size={15} className="absolute left-5 text-[#777777]" />
+                  Sign up with email
+                </button> */}
+
+                {/* EXISTING ACCOUNT */}
+                {/* <button
+                  onClick={() => {
+                    setMode("signin");
+                    setScreen("email");
+                    clearMessages();
+                  }}
+                  className="mt-5 text-center text-[11px] text-[#888888] transition hover:text-white"
+                >
+                  Find account
+                </button> */}
+
+                {loading && (
+                  <div className="flex justify-center pt-2">
+                    <Loader2 size={17} className="animate-spin text-[#ff7628]" />
+                  </div>
+                )}
+
+                {error && (
+                  <p className="mt-2 rounded bg-red-500/10 p-2 text-center text-[11px] text-red-400">
+                    {error}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -591,7 +630,7 @@ export default function AuthPage() {
               </p>
             )}
 
-            <button
+            {/* <button
               onClick={() => {
                 setMode("signin");
                 setScreen("email");
@@ -600,7 +639,7 @@ export default function AuthPage() {
               className="mt-6 text-center text-[10px] text-[#888888] hover:text-white"
             >
               Find account
-            </button>
+            </button> */}
           </div>
         </section>
       )}

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,7 +6,7 @@ import {
   LogOut, Trash2, X, Loader2, RefreshCw, Link2,
   BookOpen, Trophy, Clock3, GraduationCap, MessageCircle,
   Settings, Megaphone, CalendarDays, ChartNoAxesColumn, UserPlus, House,
-  ChevronRight, Send, CalendarCheck, Medal, Crown
+  ChevronRight, Send, CalendarCheck, Medal, Crown, Smile
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -51,6 +50,34 @@ const CATEGORIES = [
   "All", "General", "JEE", "NEET", "UPSC",
   "Coding", "College", "Other"
 ];
+
+// A small, hand-picked static sticker pack for Tapasya.
+// Sticker messages are stored as a marker in the existing content column,
+// so this works with the current group_messages table (no migration needed).
+const CHAT_STICKERS = [
+  { id: "focus", emoji: "🎯", label: "Locked in", tone: "from-orange-500/20 to-amber-400/10" },
+  { id: "books", emoji: "📚", label: "Book stack", tone: "from-sky-500/20 to-blue-400/10" },
+  { id: "coffee", emoji: "☕", label: "Coffee break", tone: "from-amber-600/20 to-orange-400/10" },
+  { id: "fire", emoji: "🔥", label: "On fire", tone: "from-orange-500/20 to-red-400/10" },
+  { id: "brain", emoji: "🧠", label: "Big brain", tone: "from-violet-500/20 to-fuchsia-400/10" },
+  { id: "rocket", emoji: "🚀", label: "Let's go", tone: "from-indigo-500/20 to-sky-400/10" },
+  { id: "trophy", emoji: "🏆", label: "W moment", tone: "from-yellow-500/20 to-amber-400/10" },
+  { id: "muscle", emoji: "💪", label: "You got this", tone: "from-emerald-500/20 to-green-400/10" },
+  { id: "owl", emoji: "🦉", label: "Night owl", tone: "from-violet-500/20 to-indigo-400/10" },
+  { id: "sleep", emoji: "😴", label: "Need sleep", tone: "from-slate-500/20 to-blue-400/10" },
+  { id: "mindblown", emoji: "🤯", label: "Mind blown", tone: "from-fuchsia-500/20 to-pink-400/10" },
+  { id: "salute", emoji: "🫡", label: "Respect", tone: "from-orange-500/20 to-yellow-400/10" },
+  { id: "love", emoji: "🫶", label: "Good vibes", tone: "from-pink-500/20 to-rose-400/10" },
+  { id: "cry", emoji: "🥲", label: "Pain", tone: "from-blue-500/20 to-cyan-400/10" },
+  { id: "check", emoji: "✅", label: "Done", tone: "from-emerald-500/20 to-teal-400/10" },
+  { id: "clap", emoji: "👏", label: "Well done", tone: "from-amber-500/20 to-yellow-400/10" },
+] as const;
+
+const STICKER_PREFIX = "[[tapasya-sticker:";
+const getSticker = (content: string) => {
+  const match = content.match(/^\[\[tapasya-sticker:([a-z0-9_-]+)\]\]$/);
+  return match ? CHAT_STICKERS.find(sticker => sticker.id === match[1]) ?? null : null;
+};
 
 const supabase = createClient();
 
@@ -137,6 +164,7 @@ export default function GroupsPanel() {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [chatError, setChatError] = useState("");
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
 
@@ -339,9 +367,27 @@ export default function GroupsPanel() {
 
     loadStudySessions();
 
-    const refreshTimer = window.setInterval(loadStudySessions, 10000);
+    // Realtime updates when a member starts/stops studying.
+    const channel = supabase
+      .channel(`study-sessions-${selectedGroup.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "study_sessions",
+          filter: `group_id=eq.${selectedGroup.id}`,
+        },
+        () => loadStudySessions()
+      )
+      .subscribe();
+
+    // Fallback polling in case Realtime is not enabled for study_sessions.
+    const refreshTimer = window.setInterval(loadStudySessions, 3000);
+
     return () => {
       window.clearInterval(refreshTimer);
+      supabase.removeChannel(channel);
     };
   }, [selectedGroup?.id, loadStudySessions]);
 
@@ -456,6 +502,25 @@ export default function GroupsPanel() {
     if (insertError) setChatError(insertError.message);
     else {
       setMessageDraft("");
+      await loadMessages();
+    }
+    setSendingMessage(false);
+  }
+
+  async function sendSticker(stickerId: string) {
+    if (!selectedGroup || !userId || sendingMessage) return;
+    setSendingMessage(true);
+    setChatError("");
+    const content = `${STICKER_PREFIX}${stickerId}]]`;
+    const { error: insertError } = await supabase.from("group_messages").insert({
+      group_id: selectedGroup.id,
+      user_id: userId,
+      content,
+    });
+    if (insertError) {
+      setChatError(insertError.message);
+    } else {
+      setShowStickerPicker(false);
       await loadMessages();
     }
     setSendingMessage(false);
@@ -794,9 +859,10 @@ export default function GroupsPanel() {
                     session => session.user_id === member.user_id
                   );
                   const isStudying = Boolean(activeSession);
-                  const studySeconds = activeSession
-                    ? getSessionElapsed(activeSession)
-                    : getMemberStudyTime(member.user_id);
+                  // Today's finished sessions + the currently running one.
+                  const studySeconds =
+                    getMemberStudyTime(member.user_id) +
+                    (activeSession ? getSessionElapsed(activeSession) : 0);
 
                   return (
                     <div
@@ -924,10 +990,81 @@ export default function GroupsPanel() {
               <div className="mb-4 flex items-center gap-3"><button onClick={() => setRoomTab("home")} className="text-[#999999] hover:text-white"><ArrowLeft size={18}/></button><div><h2 className="text-[16px] font-semibold text-white">Group chat</h2><p className="mt-1 text-[10px] text-[#777777]">Messages are visible to group members</p></div><button onClick={loadMessages} className="ml-auto rounded-md bg-[#202020] p-2 text-[#999999] hover:text-white"><RefreshCw size={14}/></button></div>
               {chatError && <p className="mb-3 rounded-md border border-red-900/40 bg-red-950/20 p-2 text-[10px] text-red-300">{chatError}</p>}
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-[#2d2d2d] bg-[#151515] p-4 lg:p-6">
-                {messages.map(message => <div key={message.id} className={`flex ${message.user_id === userId ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 ${message.user_id === userId ? "bg-[#D97736]/20" : "bg-[#252525]"}`}><p className="mb-1 text-[9px] font-semibold text-[#D97736]">@{message.username}{message.user_id === userId ? " · You" : ""}</p><p className="whitespace-pre-wrap break-words text-[11px] text-[#e0e0e0]">{message.content}</p><p className="mt-1 text-right text-[8px] text-[#777777]">{new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></div></div>)}
+                {messages.map(message => {
+                  const sticker = getSticker(message.content);
+                  return (
+                    <div key={message.id} className={`flex ${message.user_id === userId ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[85%] rounded-xl px-3 py-2 ${sticker ? "min-w-[104px] bg-transparent" : message.user_id === userId ? "bg-[#D97736]/20" : "bg-[#252525]"}`}>
+                        <p className="mb-1 text-[9px] font-semibold text-[#D97736]">
+                          @{message.username}{message.user_id === userId ? " · You" : ""}
+                        </p>
+                        {sticker ? (
+                          <div className={`flex h-[104px] w-[104px] items-center justify-center rounded-2xl border border-white/[0.07] bg-gradient-to-br ${sticker.tone} shadow-lg`}>
+                            <span role="img" aria-label={sticker.label} className="select-none text-[56px] leading-none drop-shadow-md">{sticker.emoji}</span>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words text-[11px] text-[#e0e0e0]">{message.content}</p>
+                        )}
+                        <p className="mt-1 text-right text-[8px] text-[#777777]">
+                          {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
                 {!messages.length && <p className="py-12 text-center text-[11px] text-[#777777]">No messages yet. Say hello 👋</p>}
               </div>
-              <form onSubmit={sendMessage} className="mt-3 flex shrink-0 gap-2"><input value={messageDraft} onChange={e => setMessageDraft(e.target.value)} maxLength={1000} placeholder="Write a message..." className="h-11 min-w-0 flex-1 rounded-lg border border-[#383838] bg-[#191919] px-3 text-[11px] text-white outline-none focus:border-[#D97736]"/><button disabled={!messageDraft.trim() || sendingMessage} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#D97736] text-black disabled:opacity-40">{sendingMessage ? <Loader2 size={15} className="animate-spin"/> : <Send size={15}/>}</button></form>
+
+              {showStickerPicker && (
+                <div className="mt-3 shrink-0 rounded-xl border border-[#303030] bg-[#191919] p-3 shadow-xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] font-semibold text-white">Tapasya stickers</p>
+                      <p className="mt-0.5 text-[9px] text-[#777777]">A hand-picked set. No random uploads.</p>
+                    </div>
+                    <button type="button" onClick={() => setShowStickerPicker(false)} className="rounded-md p-1.5 text-[#888888] hover:bg-[#292929] hover:text-white" aria-label="Close stickers">
+                      <X size={15}/>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                    {CHAT_STICKERS.map(sticker => (
+                      <button
+                        key={sticker.id}
+                        type="button"
+                        disabled={sendingMessage}
+                        onClick={() => sendSticker(sticker.id)}
+                        title={sticker.label}
+                        className={`group flex min-h-[76px] flex-col items-center justify-center gap-1 rounded-xl border border-white/[0.06] bg-gradient-to-br ${sticker.tone} transition hover:-translate-y-0.5 hover:border-[#D97736]/50 disabled:opacity-40`}
+                      >
+                        <span className="text-[29px] leading-none transition group-hover:scale-110">{sticker.emoji}</span>
+                        <span className="max-w-full truncate px-1 text-[8px] text-[#b7b7b7]">{sticker.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={sendMessage} className="mt-3 flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowStickerPicker(value => !value)}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition ${showStickerPicker ? "border-[#D97736] bg-[#D97736]/15 text-[#F0A06B]" : "border-[#383838] bg-[#191919] text-[#aaaaaa] hover:border-[#D97736]/60 hover:text-white"}`}
+                  aria-label="Open stickers"
+                  title="Stickers"
+                >
+                  <Smile size={18}/>
+                </button>
+                <input
+                  value={messageDraft}
+                  onChange={e => setMessageDraft(e.target.value)}
+                  maxLength={1000}
+                  placeholder="Write a message..."
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-[#383838] bg-[#191919] px-3 text-[11px] text-white outline-none focus:border-[#D97736]"
+                />
+                <button disabled={!messageDraft.trim() || sendingMessage} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#D97736] text-black disabled:opacity-40">
+                  {sendingMessage ? <Loader2 size={15} className="animate-spin"/> : <Send size={15}/>}
+                </button>
+              </form>
             </div>
           )}
         </div>

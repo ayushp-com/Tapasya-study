@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -6,7 +5,7 @@ import {
   Timer, CheckSquare, CalendarDays, Users, Plus, Play, Pause,
   MoreVertical, Pencil, Trash2, ChevronUp, ChevronDown, X,
   PanelRight, Check, ChevronLeft, ChevronRight,
-  UserRound, LogOut
+  UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast
 } from "lucide-react";
 import GroupsPanel from "@/components/groups/GroupsPanel";
 import LiveStudyRoom from "@/components/LiveStudyRoom";
@@ -28,6 +27,15 @@ type Task = {
   completed: boolean;
 };
 
+type WorldStudySession = {
+  id: string;
+  user_id: string;
+  username: string;
+  subject_name: string;
+  started_at: string;
+  ended_at: string | null;
+};
+
 const supabase = createClient();
 
 const COLORS = [
@@ -36,11 +44,9 @@ const COLORS = [
 ];
 
 const INITIAL_SUBJECTS: Subject[] = [
-  { id: 1, name: "MATHS", color: "#FF7628", seconds: 0, targetHours: 2 },
-  { id: 2, name: "PHYSICS", color: "#FF7628", seconds: 0, targetHours: 1 },
-  { id: 3, name: "MERN STACK", color: "#2196F3", seconds: 0, targetHours: 3 },
-  { id: 4, name: "OTHERS", color: "#F5E82E", seconds: 0, targetHours: 1 },
-  { id: 5, name: "DSA", color: "#2196F3", seconds: 0, targetHours: 2 },
+  { id: 1, name: "PHYSICS", color: "#2196F3", seconds: 0, targetHours: 1 },
+  { id: 2, name: "CHEMISTRY", color: "#22C55E", seconds: 0, targetHours: 1 },
+  { id: 3, name: "MATHS", color: "#FF7628", seconds: 0, targetHours: 2 },
 ];
 
 const dateKey = (date: Date) => {
@@ -115,10 +121,505 @@ function monthName(date: Date) {
   return date.toLocaleDateString("en-US", { month: "short" });
 }
 
+// ===== SHARE CARD (story-size 1080 x 1920) =====
+type ShareSubject = {
+  name: string;
+  color: string;
+  seconds: number;
+  targetHours: number;
+};
+
+type ShareThemeId = "ember" | "ocean" | "neon";
+
+type Theme = {
+  id: ShareThemeId;
+  label: string;
+  accent: string;
+  accent2: string;
+  bg: string;
+};
+
+const SHARE_THEMES: Theme[] = [
+  { id: "ember", label: "Ember", accent: "#FF7628", accent2: "#FFC14D", bg: "#1a0d07" },
+  { id: "ocean", label: "Ocean", accent: "#2196F3", accent2: "#5EEAD4", bg: "#07121d" },
+  { id: "neon", label: "Neon", accent: "#A78BFA", accent2: "#F472B6", bg: "#150b21" },
+];
+
+type ShareCardInput = {
+  username: string;
+  subjects: ShareSubject[];
+  theme?: ShareThemeId;
+  siteLabel?: string;
+};
+
+const W = 1080;
+const H = 1920;
+const SANS = "ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const MONO = "ui-monospace, Menlo, Consolas, monospace";
+
+// Mascot "Tapi" levels, driven by total study time.
+const LEVELS = [
+  { min: 0, rank: "BOOTING UP", bubble: "5 more mins?" },
+  { min: 1200, rank: "WARMING UP", bubble: "warming up!" },
+  { min: 3600, rank: "LOCKED IN", bubble: "locked in." },
+  { min: 3 * 3600, rank: "ON FIRE", bubble: "no days off." },
+  { min: 6 * 3600, rank: "ABSOLUTE BEAST", bubble: "built different." },
+];
+
+function getLevel(totalSeconds: number) {
+  let level = 0;
+  LEVELS.forEach((l, i) => {
+    if (totalSeconds >= l.min) level = i;
+  });
+  return level;
+}
+
+function hexA(hex: string, a: number) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+function setSpacing(ctx: CanvasRenderingContext2D, px: number) {
+  (ctx as unknown as { letterSpacing: string }).letterSpacing = `${px}px`;
+}
+
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
+
+function flamePath(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - s * 0.95);
+  ctx.bezierCurveTo(cx + s * 0.25, cy - s * 0.55, cx + s * 0.85, cy - s * 0.25, cx + s * 0.8, cy + s * 0.25);
+  ctx.bezierCurveTo(cx + s * 0.75, cy + s * 0.75, cx + s * 0.35, cy + s * 0.95, cx, cy + s * 0.95);
+  ctx.bezierCurveTo(cx - s * 0.35, cy + s * 0.95, cx - s * 0.75, cy + s * 0.75, cx - s * 0.8, cy + s * 0.25);
+  ctx.bezierCurveTo(cx - s * 0.85, cy - s * 0.25, cx - s * 0.25, cy - s * 0.55, cx, cy - s * 0.95);
+  ctx.closePath();
+}
+
+function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI / 4) * i - Math.PI / 2;
+    const rad = i % 2 === 0 ? r : r * 0.3;
+    const px = x + Math.cos(a) * rad;
+    const py = y + Math.sin(a) * rad;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+// "Tapi" - a little flame spirit whose mood depends on study time.
+function drawMascot(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, level: number, theme: Theme) {
+  // ground shadow
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + s * 1.12, s * 0.7, s * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // sparkles around (more sparkles = higher level)
+  const spots = [
+    [-1.35, -0.7, 26], [1.4, -0.2, 30], [-1.2, 0.5, 18], [1.25, 0.8, 22],
+    [-0.9, -1.1, 16], [0.95, -1.05, 20], [-1.55, -0.1, 14], [1.6, 0.4, 16],
+  ];
+  const count = Math.min(spots.length, 2 + level * 2);
+  for (let i = 0; i < count; i++) {
+    const [dx, dy, r] = spots[i];
+    ctx.fillStyle = i % 2 === 0 ? theme.accent2 : "#ffffff";
+    ctx.globalAlpha = 0.9;
+    star(ctx, cx + dx * s * 0.8, cy + dy * s * 0.8, r);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // body with glow
+  ctx.save();
+  ctx.shadowColor = hexA(theme.accent, 0.85);
+  ctx.shadowBlur = 70 + level * 15;
+  const body = ctx.createLinearGradient(cx, cy - s, cx, cy + s);
+  body.addColorStop(0, theme.accent2);
+  body.addColorStop(1, theme.accent);
+  ctx.fillStyle = body;
+  flamePath(ctx, cx, cy, s);
+  ctx.fill();
+  ctx.restore();
+
+  // inner highlight flame
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  flamePath(ctx, cx, cy + s * 0.25, s * 0.6);
+  ctx.fill();
+
+  const ink = "#2a1208";
+  const ey = cy + s * 0.12;
+  const ex = s * 0.27;
+  const er = s * 0.14;
+
+  if (level === 0) {
+    // sleepy closed eyes
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = s * 0.05;
+    ctx.lineCap = "round";
+    [-1, 1].forEach(side => {
+      ctx.beginPath();
+      ctx.arc(cx + side * ex, ey, er * 0.85, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.stroke();
+    });
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = `800 ${Math.round(s * 0.28)}px ${SANS}`;
+    ctx.textAlign = "left";
+    ctx.fillText("z", cx + s * 0.62, cy - s * 0.5);
+    ctx.font = `800 ${Math.round(s * 0.2)}px ${SANS}`;
+    ctx.fillText("z", cx + s * 0.88, cy - s * 0.72);
+    ctx.textAlign = "center";
+  } else if (level <= 2) {
+    [-1, 1].forEach(side => {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx + side * ex, ey, er, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.arc(cx + side * ex + side * -er * 0.1, ey + er * 0.1, er * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx + side * ex - er * 0.15, ey - er * 0.15, er * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    if (level === 2) {
+      // determined brows
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = s * 0.055;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx - ex - er, ey - er * 1.8);
+      ctx.lineTo(cx - ex + er, ey - er * 1.3);
+      ctx.moveTo(cx + ex + er, ey - er * 1.8);
+      ctx.lineTo(cx + ex - er, ey - er * 1.3);
+      ctx.stroke();
+    }
+  } else {
+    // sunglasses = flex mode
+    ctx.fillStyle = "#0a0a0a";
+    [-1, 1].forEach(side => {
+      rr(ctx, cx + side * ex - er * 1.4, ey - er * 1.0, er * 2.8, er * 2.0, er * 0.7);
+      ctx.fill();
+    });
+    ctx.strokeStyle = "#0a0a0a";
+    ctx.lineWidth = s * 0.04;
+    ctx.beginPath();
+    ctx.moveTo(cx - ex + er * 1.4, ey - er * 0.2);
+    ctx.lineTo(cx + ex - er * 1.4, ey - er * 0.2);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = s * 0.03;
+    ctx.lineCap = "round";
+    [-1, 1].forEach(side => {
+      ctx.beginPath();
+      ctx.moveTo(cx + side * ex - er * 0.7, ey - er * 0.6);
+      ctx.lineTo(cx + side * ex - er * 0.2, ey - er * 0.6);
+      ctx.stroke();
+    });
+  }
+
+  // cheeks
+  if (level > 0) {
+    ctx.fillStyle = "rgba(255,80,110,0.35)";
+    [-1, 1].forEach(side => {
+      ctx.beginPath();
+      ctx.ellipse(cx + side * (ex + er * 1.1), ey + er * 2.1, er * 0.7, er * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // mouth
+  const my = ey + er * 2.5;
+  if (level === 0) {
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.ellipse(cx, my, s * 0.045, s * 0.055, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (level <= 2) {
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = s * 0.05;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(cx, my - s * 0.07, s * 0.13, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.arc(cx, my - s * 0.09, s * 0.17, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#ff6b81";
+    ctx.beginPath();
+    ctx.ellipse(cx, my + s * 0.04, s * 0.07, s * 0.04, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // crown for the top level
+  if (level >= 4) {
+    const w = s * 0.34;
+    const h = s * 0.3;
+    const bx = cx;
+    const by = cy - s * 0.86;
+    const pts: [number, number][] = [
+      [-w, 0], [-w, -h], [-w / 2, -h * 0.45], [0, -h * 1.2], [w / 2, -h * 0.45], [w, -h], [w, 0],
+    ];
+    ctx.fillStyle = "#FFD54A";
+    ctx.strokeStyle = "#8a5a00";
+    ctx.lineWidth = 5;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(bx + px, by + py);
+      else ctx.lineTo(bx + px, by + py);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawBubble(ctx: CanvasRenderingContext2D, text: string, mascotX: number, mascotY: number, s: number) {
+  ctx.font = `800 34px ${SANS}`;
+  const bw = ctx.measureText(text).width + 60;
+  const bh = 78;
+  let bx = mascotX + s * 0.95;
+  bx = Math.min(bx, W - 70 - bw);
+  const by = mascotY - s * 1.0;
+
+  ctx.save();
+  ctx.translate(bx + bw / 2, by + bh / 2);
+  ctx.rotate(-0.05);
+  ctx.translate(-(bx + bw / 2), -(by + bh / 2));
+
+  ctx.fillStyle = "#ffffff";
+  rr(ctx, bx, by, bw, bh, 28);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(bx + 22, by + bh - 2);
+  ctx.lineTo(bx + 72, by + bh - 2);
+  ctx.lineTo(bx + 2, by + bh + 38);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "#151515";
+  ctx.textAlign = "center";
+  ctx.fillText(text, bx + bw / 2, by + bh / 2 + 12);
+  ctx.restore();
+}
+
+function drawShareCard(input: ShareCardInput): HTMLCanvasElement | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const theme = SHARE_THEMES.find(t => t.id === input.theme) ?? SHARE_THEMES[0];
+  const subjects = input.subjects;
+  const totalSeconds = subjects.reduce((sum, s) => sum + s.seconds, 0);
+  const level = getLevel(totalSeconds);
+  const info = LEVELS[level];
+
+  // ---------- background ----------
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, theme.bg);
+  bg.addColorStop(1, "#070707");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const glow = ctx.createRadialGradient(W / 2, 600, 20, W / 2, 600, 760);
+  glow.addColorStop(0, hexA(theme.accent, 0.3));
+  glow.addColorStop(1, hexA(theme.accent, 0));
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  const glow2 = ctx.createRadialGradient(W / 2, H, 10, W / 2, H, 700);
+  glow2.addColorStop(0, hexA(theme.accent2, 0.14));
+  glow2.addColorStop(1, hexA(theme.accent2, 0));
+  ctx.fillStyle = glow2;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "rgba(255,255,255,0.05)";
+  for (let x = 30; x < W; x += 60) {
+    for (let y = 30; y < H; y += 60) {
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.textAlign = "center";
+
+  // ---------- header ----------
+  setSpacing(ctx, 10);
+  ctx.fillStyle = theme.accent;
+  ctx.font = `800 34px ${SANS}`;
+  ctx.fillText("TAPASYA", W / 2, 292);
+  setSpacing(ctx, 0);
+
+  ctx.fillStyle = "#8a8a8a";
+  ctx.font = `500 28px ${SANS}`;
+  ctx.fillText(
+    new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
+    W / 2,
+    338
+  );
+
+  // ---------- mascot + bubble ----------
+  const mx = W / 2;
+  const my = 560;
+  const ms = 135;
+  drawMascot(ctx, mx, my, ms, level, theme);
+  drawBubble(ctx, info.bubble, mx, my, ms);
+  ctx.textAlign = "center";
+
+  // ---------- rank pill ----------
+  ctx.font = `800 34px ${SANS}`;
+  setSpacing(ctx, 6);
+  const pillW = ctx.measureText(info.rank).width + 90;
+  const pillX = (W - pillW) / 2;
+  const pillY = 748;
+  const pillGrad = ctx.createLinearGradient(pillX, 0, pillX + pillW, 0);
+  pillGrad.addColorStop(0, theme.accent);
+  pillGrad.addColorStop(1, theme.accent2);
+  ctx.fillStyle = pillGrad;
+  rr(ctx, pillX, pillY, pillW, 66, 33);
+  ctx.fill();
+  ctx.fillStyle = "#1a0d05";
+  ctx.fillText(info.rank, W / 2 + 3, pillY + 45);
+  setSpacing(ctx, 0);
+
+  // ---------- username + time ----------
+  ctx.fillStyle = "#e6e6e6";
+  ctx.font = `700 46px ${SANS}`;
+  ctx.fillText(fitText(ctx, `@${input.username || "student"}`, 800), W / 2, 900);
+
+  ctx.save();
+  ctx.shadowColor = hexA(theme.accent, 0.55);
+  ctx.shadowBlur = 40;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `800 170px ${MONO}`;
+  ctx.fillText(formatTime(totalSeconds), W / 2, 1060);
+  ctx.restore();
+
+  ctx.fillStyle = "#8a8a8a";
+  ctx.font = `500 32px ${SANS}`;
+  ctx.fillText("of focused study today", W / 2, 1112);
+
+  // ---------- stat chips ----------
+  const totalTargetSeconds = subjects.reduce((sum, s) => sum + (s.targetHours || 0) * 3600, 0);
+  const goalPct = totalTargetSeconds > 0 ? Math.min(999, Math.round((totalSeconds / totalTargetSeconds) * 100)) : null;
+  const studied = subjects.filter(s => s.seconds > 0);
+  const top = [...studied].sort((a, b) => b.seconds - a.seconds)[0];
+
+  const chips = [
+    { value: goalPct === null ? "—" : `${goalPct}%`, label: "DAILY GOAL", color: theme.accent2 },
+    { value: String(studied.length), label: "SUBJECTS", color: "#ffffff" },
+    { value: top ? top.name : "—", label: "MVP SUBJECT", color: "#ffffff" },
+  ];
+  const chipW = 293;
+  const chipH = 118;
+  const chipY = 1170;
+  chips.forEach((chip, i) => {
+    const x = 80 + i * (chipW + 20);
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    rr(ctx, x, chipY, chipW, chipH, 24);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 2;
+    rr(ctx, x, chipY, chipW, chipH, 24);
+    ctx.stroke();
+
+    ctx.fillStyle = chip.color;
+    ctx.font = `800 48px ${SANS}`;
+    ctx.fillText(fitText(ctx, chip.value, chipW - 36), x + chipW / 2, chipY + 62);
+
+    setSpacing(ctx, 3);
+    ctx.fillStyle = "#808080";
+    ctx.font = `700 21px ${SANS}`;
+    ctx.fillText(chip.label, x + chipW / 2 + 1, chipY + 97);
+    setSpacing(ctx, 0);
+  });
+
+  // ---------- subject bars ----------
+  const rows = [...studied].sort((a, b) => b.seconds - a.seconds).slice(0, 3);
+  if (rows.length === 0) {
+    ctx.fillStyle = "#777777";
+    ctx.font = `500 34px ${SANS}`;
+    ctx.fillText("Start a timer to build your card", W / 2, 1440);
+  } else {
+    const maxSeconds = rows[0].seconds;
+    rows.forEach((subject, i) => {
+      const y = 1366 + i * 92;
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#e0e0e0";
+      ctx.font = `700 30px ${SANS}`;
+      ctx.fillText(fitText(ctx, subject.name, 560), 80, y);
+
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#bdbdbd";
+      ctx.font = `600 30px ${MONO}`;
+      ctx.fillText(formatTime(subject.seconds), W - 80, y);
+
+      ctx.fillStyle = "rgba(255,255,255,0.08)";
+      rr(ctx, 80, y + 20, W - 160, 16, 8);
+      ctx.fill();
+
+      ctx.save();
+      ctx.shadowColor = hexA(subject.color, 0.6);
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = subject.color;
+      rr(ctx, 80, y + 20, Math.max(16, ((W - 160) * subject.seconds) / maxSeconds), 16, 8);
+      ctx.fill();
+      ctx.restore();
+    });
+    ctx.textAlign = "center";
+  }
+
+  // ---------- footer / CTA ----------
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#b5b5b5";
+  ctx.font = `600 32px ${SANS}`;
+  ctx.fillText("Don't study alone. Study together.", W / 2, 1660);
+
+  const label = (input.siteLabel || "tapasya").toUpperCase();
+  ctx.font = `800 30px ${SANS}`;
+  setSpacing(ctx, 4);
+  const urlW = ctx.measureText(label).width + 80;
+  const urlX = (W - urlW) / 2;
+  const urlGrad = ctx.createLinearGradient(urlX, 0, urlX + urlW, 0);
+  urlGrad.addColorStop(0, theme.accent);
+  urlGrad.addColorStop(1, theme.accent2);
+  ctx.fillStyle = urlGrad;
+  rr(ctx, urlX, 1696, urlW, 64, 32);
+  ctx.fill();
+  ctx.fillStyle = "#1a0d05";
+  ctx.fillText(label, W / 2 + 2, 1738);
+  setSpacing(ctx, 0);
+
+  return canvas;
+}
+
 export default function Home() {
   const [subjects, setSubjects] = useState<Subject[]>(INITIAL_SUBJECTS);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeSubject, setActiveSubject] = useState<number | null>(null);
+  const [activeSessionStartedAt, setActiveSessionStartedAt] = useState<string | null>(null);
   const studySessionRunRef = useRef(0);
   const hasInitializedStudySessionRef = useRef(false);
 
@@ -133,11 +634,25 @@ export default function Home() {
   const [calendarModal, setCalendarModal] = useState(false);
 
   const [selectedTab, setSelectedTab] = useState("Timer");
+  const [worldActivityPeriod, setWorldActivityPeriod] = useState<"today" | "yesterday">("today");
   const [menuId, setMenuId] = useState<number | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [appTheme, setAppTheme] = useState<"dark" | "light" | "amoled">("amoled");
+  const [themeReady, setThemeReady] = useState(false);
   const [profileUsername, setProfileUsername] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // Share study card
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareImage, setShareImage] = useState("");
+  const [shareTheme, setShareTheme] = useState<ShareThemeId>("ember");
+
+  // World page: live public study activity (opt-in visibility is enforced by RLS).
+  const [worldSessions, setWorldSessions] = useState<WorldStudySession[]>([]);
+  const [worldLoading, setWorldLoading] = useState(false);
+  const [worldError, setWorldError] = useState("");
 
   const [subjectModal, setSubjectModal] = useState(false);
   const [editingSubjectId, setEditingSubjectId] = useState<number | null>(null);
@@ -150,6 +665,21 @@ export default function Home() {
   const [taskTitle, setTaskTitle] = useState("");
   const [taskSubject, setTaskSubject] = useState("");
   const [taskDate, setTaskDate] = useState("");
+
+  // Restore and persist the app appearance without changing study data.
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem("tapasya-app-theme");
+      if (savedTheme === "light" || savedTheme === "amoled") setAppTheme(savedTheme);
+    } catch (error) { console.error("Could not load appearance preference:", error); }
+    finally { setThemeReady(true); }
+  }, []);
+
+  useEffect(() => {
+    if (!themeReady) return;
+    try { localStorage.setItem("tapasya-app-theme", appTheme); }
+    catch (error) { console.error("Could not save appearance preference:", error); }
+  }, [appTheme, themeReady]);
 
   // Load the signed-in user's identity for the profile menu.
   useEffect(() => {
@@ -249,6 +779,20 @@ export default function Home() {
     localStorage.setItem("tapasya-tasks", JSON.stringify(tasks));
   }, [tasks, ready]);
 
+  // One timestamp is shared by the dashboard timer, group sessions, World, and live presence.
+  const toggleSubjectTimer = (subjectId: number) => {
+    if (activeSubject === subjectId) {
+      setActiveSubject(null);
+      setActiveSessionStartedAt(null);
+      return;
+    }
+
+    setActiveSessionStartedAt(new Date().toISOString());
+    setActiveSubject(subjectId);
+  };
+
+  const activeSubjectNameForSync = subjects.find(subject => subject.id === activeSubject)?.name ?? null;
+
   // Sync the local focus timer with Supabase so group rooms can show live study time.
   useEffect(() => {
     if (activeSubject === null && !hasInitializedStudySessionRef.current) {
@@ -300,7 +844,7 @@ export default function Home() {
       if (closeError) console.error("Could not close previous study session:", closeError);
       if (studySessionRunRef.current !== runId) return;
 
-      const startedAt = new Date().toISOString();
+      const startedAt = activeSessionStartedAt ?? new Date().toISOString();
       const { data: createdSessions, error: insertError } = await supabase
         .from("study_sessions")
         .insert(groupIds.map(group_id => ({
@@ -326,7 +870,179 @@ export default function Home() {
     };
 
     void syncStudySession();
-  }, [activeSubject]);
+  }, [activeSubject, activeSessionStartedAt]);
+
+  // Publish the current timer as a global study session for the World page.
+  // This is separate from group_sessions so students without groups are included too.
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncGlobalStudySession = async () => {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user || cancelled) return;
+
+      const userId = authData.user.id;
+
+      if (activeSubject === null) {
+        const { error } = await supabase
+          .from("global_study_sessions")
+          .update({ ended_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .is("ended_at", null);
+        if (error) console.error("Could not stop global study session:", error);
+        return;
+      }
+
+      if (!activeSubjectNameForSync) return;
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("Could not load username for World study session:", profileError);
+        return;
+      }
+      if (cancelled) return;
+
+      // Close any stale active row before publishing the new subject.
+      const { error: closeError } = await supabase
+        .from("global_study_sessions")
+        .update({ ended_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .is("ended_at", null);
+
+      if (closeError) {
+        console.error("Could not close previous global study session:", closeError);
+        return;
+      }
+      if (cancelled) return;
+
+      const { error: insertError } = await supabase
+        .from("global_study_sessions")
+        .insert({
+          user_id: userId,
+          username: profile?.username || "Student",
+          subject_name: activeSubjectNameForSync,
+          started_at: activeSessionStartedAt ?? new Date().toISOString(),
+          ended_at: null,
+        });
+
+      if (insertError) console.error("Could not publish global study session:", insertError);
+    };
+
+    void syncGlobalStudySession();
+    return () => { cancelled = true; };
+  }, [activeSubject, activeSessionStartedAt, activeSubjectNameForSync]);
+
+  // Load worldwide live activity and today's study sessions.
+  useEffect(() => {
+    if (selectedTab !== "World") return;
+
+    let cancelled = false;
+    const loadWorldSessions = async () => {
+      setWorldLoading(true);
+      setWorldError("");
+
+      const { data, error } = await supabase
+        .from("global_study_sessions")
+        .select("id, user_id, username, subject_name, started_at, ended_at")
+        .order("started_at", { ascending: false })
+        .limit(500);
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Could not load World study activity:", error);
+        setWorldError("World activity needs the database setup below. Please run the SQL migration.");
+        setWorldLoading(false);
+        return;
+      }
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const yesterdayStart = new Date(todayStart);
+      yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+      // global_study_sessions was introduced after the original timer.
+      // Recover this user's earlier sessions from the existing group study log
+      // so yesterday is not blank for sessions recorded before global tracking.
+      const { data: authData } = await supabase.auth.getUser();
+      let legacyRows: WorldStudySession[] = [];
+
+      if (authData.user && !cancelled) {
+        const [{ data: oldSessions, error: oldSessionsError }, { data: profile }] = await Promise.all([
+          supabase
+            .from("study_sessions")
+            .select("id, user_id, started_at, ended_at")
+            .eq("user_id", authData.user.id)
+            .gte("started_at", yesterdayStart.toISOString())
+            .lt("started_at", new Date(todayStart.getTime() + 24 * 60 * 60 * 1000).toISOString())
+            .order("started_at", { ascending: false })
+            .limit(500),
+          supabase
+            .from("profiles")
+            .select("username")
+            .eq("id", authData.user.id)
+            .maybeSingle()
+        ]);
+
+        if (oldSessionsError) {
+          console.warn("Could not load legacy study history:", oldSessionsError);
+        } else {
+          const username = profile?.username || "student";
+          const seen = new Set<string>();
+          legacyRows = (oldSessions ?? []).filter(row => {
+            const key = `${row.user_id}:${row.started_at}:${row.ended_at ?? "active"}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }).map(row => ({
+            id: `legacy-${row.id}`,
+            user_id: row.user_id,
+            username,
+            subject_name: "Study session",
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+          }));
+        }
+      }
+
+      if (cancelled) return;
+      const globalRows = (data ?? []) as WorldStudySession[];
+      const combined = [...globalRows, ...legacyRows];
+      const unique = new Map<string, WorldStudySession>();
+      combined.forEach(session => {
+        const key = `${session.user_id}:${session.started_at}:${session.ended_at ?? "active"}`;
+        if (!unique.has(key)) unique.set(key, session);
+      });
+
+      setWorldSessions(Array.from(unique.values()).filter(session => {
+        const started = new Date(session.started_at).getTime();
+        return session.ended_at === null || started >= yesterdayStart.getTime();
+      }));
+      setWorldLoading(false);
+    };
+
+    void loadWorldSessions();
+    const refresh = window.setInterval(loadWorldSessions, 15000);
+
+    const channel = supabase
+      .channel("tapasya-world-study-activity")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "global_study_sessions",
+      }, () => { void loadWorldSessions(); })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(refresh);
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedTab]);
 
   // Study timer
   useEffect(() => {
@@ -346,6 +1062,79 @@ export default function Home() {
   }, [activeSubject]);
 
   const totalSeconds = subjects.reduce((sum, s) => sum + s.seconds, 0);
+
+  // SHARE STUDY CARD
+  function buildShareCanvas(theme: ShareThemeId = shareTheme) {
+    return drawShareCard({
+      username: profileUsername || "student",
+      subjects,
+      theme,
+      siteLabel: "tapasya",
+    });
+  }
+
+  async function getShareBlob(): Promise<Blob | null> {
+    const canvas = buildShareCanvas();
+    if (!canvas) return null;
+    return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+  }
+
+  function downloadBlob(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tapasya-study-card.png";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function openShare() {
+    setShareOpen(true);
+    setShareImage("");
+    const canvas = buildShareCanvas();
+    if (canvas) setShareImage(canvas.toDataURL("image/png"));
+  }
+
+  function changeShareTheme(theme: ShareThemeId) {
+    setShareTheme(theme);
+    const canvas = buildShareCanvas(theme);
+    if (canvas) setShareImage(canvas.toDataURL("image/png"));
+  }
+
+  async function handleShareCard() {
+    if (shareBusy) return;
+    setShareBusy(true);
+
+    try {
+      const blob = await getShareBlob();
+      if (!blob) return;
+
+      const file = new File([blob], "tapasya-study-card.png", { type: "image/png" });
+
+      if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "My Tapasya study card",
+          text: `I studied ${formatTime(totalSeconds)} on Tapasya!`,
+        });
+      } else {
+        downloadBlob(blob);
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        console.error("Could not share study card:", error);
+      }
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function handleDownloadCard() {
+    const blob = await getShareBlob();
+    if (blob) downloadBlob(blob);
+  }
 
   // SUBJECT MANAGEMENT
   function openAddSubject() {
@@ -404,7 +1193,10 @@ export default function Home() {
     const subject = subjects.find(s => s.id === id);
     setSubjects(current => current.filter(s => s.id !== id));
 
-    if (activeSubject === id) setActiveSubject(null);
+    if (activeSubject === id) {
+      setActiveSubject(null);
+      setActiveSessionStartedAt(null);
+    }
 
     if (subject) {
       setTasks(current => current.map(t =>
@@ -529,7 +1321,8 @@ export default function Home() {
 
   return (
     <main
-      className="min-h-screen bg-[#111111] text-[#d0d0d0]"
+      data-theme={appTheme}
+      className="tapasya-theme min-h-screen bg-[#111111] text-[#d0d0d0]"
       onClick={() => {
         if (menuId !== null) setMenuId(null);
         if (profileMenuOpen) setProfileMenuOpen(false);
@@ -543,6 +1336,7 @@ export default function Home() {
             { name: "To-Do", icon: CheckSquare },
             { name: "Calendar", icon: CalendarDays },
             { name: "Groups", icon: Users },
+            { name: "World", icon: Globe2 },
           ].map(({ name, icon: Icon }) => (
             <button
               key={name}
@@ -558,7 +1352,7 @@ export default function Home() {
             </button>
           ))}
 
-          {selectedTab !== "Groups" && (
+          {/* {selectedTab !== "Groups" && (
             <>
               <div className="mx-2 h-5 w-px bg-[#292929]" />
 
@@ -574,75 +1368,111 @@ export default function Home() {
                 <Plus size={17} />
               </button>
             </>
-          )}
+          )} */}
         </div>
 
-        <div className="relative shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
+          {/* SHARE STUDY CARD BUTTON */}
           <button
             type="button"
             onClick={event => {
               event.stopPropagation();
-              setProfileMenuOpen(open => !open);
+              openShare();
             }}
-            aria-label="Open profile menu"
-            aria-expanded={profileMenuOpen}
-            className="flex h-9 items-center gap-2 rounded-full border border-[#303030] bg-[#191919] px-2.5 text-[#cfcfcf] transition hover:border-[#505050] hover:bg-[#242424]"
+            aria-label="Share your study card"
+            title="Share your study card"
+            className="flex h-9 items-center gap-1.5 rounded-full border border-[#303030] bg-[#191919] px-3 text-[#cfcfcf] transition hover:border-[#FF7628]/60 hover:bg-[#242424] hover:text-white"
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#303030] text-[#FF7628]">
-              <UserRound size={14} />
-            </span>
-            <span className="hidden max-w-[110px] truncate text-[11px] font-medium sm:block">
-              {profileUsername ? `@${profileUsername}` : "Profile"}
-            </span>
-            <ChevronDown size={13} className={`text-[#888888] transition-transform ${profileMenuOpen ? "rotate-180" : ""}`} />
+            <Share2 size={14} className="text-[#FF7628]" />
+            <span className="hidden text-[11px] font-medium sm:block">Share</span>
           </button>
 
-          {profileMenuOpen && (
-            <div
-              onClick={event => event.stopPropagation()}
-              className="absolute right-0 top-11 z-50 w-[250px] overflow-hidden rounded-xl border border-[#353535] bg-[#1c1c1c] shadow-[0_16px_50px_rgba(0,0,0,0.55)]"
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={event => {
+                event.stopPropagation();
+                setProfileMenuOpen(open => !open);
+              }}
+              aria-label="Open profile menu"
+              aria-expanded={profileMenuOpen}
+              className="flex h-9 items-center gap-2 rounded-full border border-[#303030] bg-[#191919] px-2.5 text-[#cfcfcf] transition hover:border-[#505050] hover:bg-[#242424]"
             >
-              <div className="border-b border-[#303030] px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#30251f] text-[#FF7628]">
-                    <UserRound size={19} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-[13px] font-semibold text-white">
-                      {profileUsername ? `@${profileUsername}` : "Your profile"}
-                    </p>
-                    <p className="mt-0.5 truncate text-[11px] text-[#888888]">
-                      {profileEmail || "Tapasya account"}
-                    </p>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#303030] text-[#FF7628]">
+                <UserRound size={14} />
+              </span>
+              <span className="hidden max-w-[110px] truncate text-[11px] font-medium sm:block">
+                {profileUsername ? `@${profileUsername}` : "Profile"}
+              </span>
+              <ChevronDown size={13} className={`text-[#888888] transition-transform ${profileMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {profileMenuOpen && (
+              <div
+                onClick={event => event.stopPropagation()}
+                className="absolute right-0 top-11 z-50 w-[250px] overflow-hidden rounded-xl border border-[#353535] bg-[#1c1c1c] shadow-[0_16px_50px_rgba(0,0,0,0.55)]"
+              >
+                <div className="border-b border-[#303030] px-4 py-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#30251f] text-[#FF7628]">
+                      <UserRound size={19} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-semibold text-white">
+                        {profileUsername ? `@${profileUsername}` : "Your profile"}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-[#888888]">
+                        {profileEmail || "Tapasya account"}
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                {/* <button
+                  type="button"
+                  onClick={() => {
+                    setProfileMenuOpen(false);
+                    window.location.assign("/auth/setup");
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-[12px] text-[#d0d0d0] transition hover:bg-[#292929]"
+                >
+                  <UserRound size={15} className="text-[#999999]" />
+                  
+                </button> */}
+
+                <div className="px-4 py-3">
+                  <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[#bdbdbd]">
+                    <Sun size={14} className="text-[#FF7628]" /> Appearance
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: "dark", label: "Dark", Icon: Moon },
+                      { id: "light", label: "Light", Icon: Sun },
+                      { id: "amoled", label: "AMOLED", Icon: Contrast },
+                    ].map(({ id, label, Icon }) => (
+                      <button key={id} type="button" aria-pressed={appTheme === id}
+                        onClick={() => setAppTheme(id as "dark" | "light" | "amoled")}
+                        className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2 text-[10px] transition ${appTheme === id ? "border-[#FF7628] bg-[#FF7628]/10 text-[#FF9A5C]" : "border-[#383838] bg-[#222222] text-[#999999] hover:border-[#666666] hover:text-white"}`}>
+                        <Icon size={15} />{label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mx-3 border-t border-[#303030]" />
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-[12px] text-[#ff7777] transition hover:bg-[#2b2020] disabled:cursor-wait disabled:opacity-60"
+                >
+                  <LogOut size={15} />
+                  {loggingOut ? "Logging out..." : "Log out"}
+                </button>
               </div>
-
-              {/* <button
-                type="button"
-                onClick={() => {
-                  setProfileMenuOpen(false);
-                  window.location.assign("/auth/setup");
-                }}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-[12px] text-[#d0d0d0] transition hover:bg-[#292929]"
-              >
-                <UserRound size={15} className="text-[#999999]" />
-                
-              </button> */}
-
-              <div className="mx-3 border-t border-[#303030]" />
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={loggingOut}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-[12px] text-[#ff7777] transition hover:bg-[#2b2020] disabled:cursor-wait disabled:opacity-60"
-              >
-                <LogOut size={15} />
-                {loggingOut ? "Logging out..." : "Log out"}
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 
@@ -670,7 +1500,14 @@ export default function Home() {
                         <p className="mt-1 text-[9px] text-[#777777]">{runningSubject?.name ?? "STUDYING"}</p>
                       </div>
                     </section>
-                    <LiveStudyRoom activeSubjectName={runningSubject?.name ?? null} onPause={() => setActiveSubject(null)} />
+                    <LiveStudyRoom
+                      activeSubjectName={runningSubject?.name ?? null}
+                      studyStartedAt={activeSessionStartedAt}
+                      onPause={() => {
+                        setActiveSubject(null);
+                        setActiveSessionStartedAt(null);
+                      }}
+                    />
                   </>
                 );
               })()}
@@ -678,17 +1515,17 @@ export default function Home() {
           ) : (
           <>
           <section className="relative h-[150px] bg-[#151515]">
-            <span className="absolute left-4 top-3 rounded-full bg-[#292929] px-2 py-0.5 text-[11px] text-[#aaaaaa]">
+            {/* <span className="absolute left-4 top-3 rounded-full bg-[#292929] px-2 py-0.5 text-[11px] text-[#aaaaaa]">
               D-?
-            </span>
+            </span> */}
 
             <p className="absolute left-1/2 top-4 -translate-x-1/2 text-[13px] font-medium text-[#cccccc]">
               {todayLabel}
             </p>
 
-            <button className="absolute right-3 top-3 text-[#aaaaaa] hover:text-white">
+            {/* <button className="absolute right-3 top-3 text-[#aaaaaa] hover:text-white">
               <PanelRight size={17} />
-            </button>
+            </button> */}
 
             <div className="absolute left-1/2 top-[62px] -translate-x-1/2 text-center">
               <p className="font-mono text-[38px] font-semibold tracking-tight text-[#e6e6e6] sm:text-[40px]">
@@ -703,7 +1540,7 @@ export default function Home() {
             return (
               <div key={subject.id} className="group relative flex h-[48px] items-center px-4 hover:bg-[#191919]">
                 <button
-                  onClick={() => setActiveSubject(active ? null : subject.id)}
+                  onClick={() => toggleSubjectTimer(subject.id)}
                   className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-[#111111]"
                   style={{ backgroundColor: subject.color }}
                 >
@@ -995,8 +1832,293 @@ export default function Home() {
         </section>
       )}
 
+      {/* WORLD STUDY ACTIVITY */}
+      {selectedTab === "World" && (() => {
+        const liveSessions = worldSessions.filter(session => session.ended_at === null);
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+        const todaySessions = worldSessions.filter(session =>
+          new Date(session.started_at).getTime() >= todayStart.getTime()
+        );
+        const yesterdaySessions = worldSessions.filter(session => {
+          const started = new Date(session.started_at).getTime();
+          return started >= yesterdayStart.getTime() && started < todayStart.getTime();
+        });
+
+        const getSessionSeconds = (session: WorldStudySession) => {
+          const start = new Date(session.started_at).getTime();
+          const end = session.ended_at ? new Date(session.ended_at).getTime() : Date.now();
+          return Math.max(0, Math.floor((end - start) / 1000));
+        };
+
+        const todaySeconds = todaySessions.reduce((total, session) => total + getSessionSeconds(session), 0);
+        const uniqueStudentsToday = new Set(todaySessions.map(session => session.user_id)).size;
+
+        const buildStudentActivity = (sessions: WorldStudySession[]) => Array.from(
+          sessions.reduce((map, session) => {
+            const existing = map.get(session.user_id);
+            const startedAt = new Date(session.started_at).getTime();
+            const duration = getSessionSeconds(session);
+
+            if (!existing) {
+              map.set(session.user_id, {
+                user_id: session.user_id,
+                username: session.username || "student",
+                totalSeconds: duration,
+                isStudying: session.ended_at === null,
+                latestStartedAt: startedAt,
+                latestSubject: session.subject_name || "Study session",
+              });
+            } else {
+              existing.totalSeconds += duration;
+              if (session.ended_at === null) existing.isStudying = true;
+              if (startedAt >= existing.latestStartedAt) {
+                existing.latestStartedAt = startedAt;
+                existing.latestSubject = session.subject_name || "Study session";
+                existing.username = session.username || existing.username;
+              }
+            }
+            return map;
+          }, new Map<string, {
+            user_id: string;
+            username: string;
+            totalSeconds: number;
+            isStudying: boolean;
+            latestStartedAt: number;
+            latestSubject: string;
+          }>())
+            .values()
+        ).sort((a, b) => b.latestStartedAt - a.latestStartedAt);
+
+        const todayActivity = buildStudentActivity(todaySessions);
+        const yesterdayActivity = buildStudentActivity(yesterdaySessions);
+
+        const renderActivityGroup = (
+          title: string,
+          subtitle: string,
+          students: ReturnType<typeof buildStudentActivity>,
+          emptyText: string
+        ) => (
+          <div className="overflow-hidden rounded-xl border border-[#292929] bg-[#151515]">
+            <div className="flex items-center justify-between border-b border-[#292929] px-4 py-4 sm:px-5">
+              <div>
+                <h2 className="text-[13px] font-semibold text-[#eeeeee]">{title}</h2>
+                <p className="mt-1 text-[10px] text-[#777777]">{subtitle}</p>
+              </div>
+              <span className="rounded-full bg-[#242424] px-2.5 py-1 text-[10px] tabular-nums text-[#bdbdbd]">
+                {students.length} {students.length === 1 ? "student" : "students"}
+              </span>
+            </div>
+
+            {students.length === 0 ? (
+              <div className="px-5 py-10 text-center text-[11px] text-[#777777]">{emptyText}</div>
+            ) : (
+              <div className="divide-y divide-[#252525]">
+                {students.map(student => (
+                  <div key={student.user_id} className="flex items-center gap-3 px-4 py-4 sm:px-5">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2b211b] text-[12px] font-semibold text-[#FF7628]">
+                      {(student.username || "S").slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-semibold text-[#e5e5e5]">@{student.username}</p>
+                      <p className="mt-1 truncate text-[10px] text-[#858585]">{student.latestSubject}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-mono text-[12px] tabular-nums text-[#FF7628]">{formatTime(student.totalSeconds)}</p>
+                      <p className={`mt-1 flex items-center justify-end gap-1 text-[9px] ${student.isStudying ? "text-[#8fdaa9]" : "text-[#777777]"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${student.isStudying ? "bg-[#35bd70] animate-pulse" : "bg-[#777777]"}`} />
+                        {student.isStudying ? "STUDYING NOW" : "STUDIED"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+        return (
+          <section className="mx-auto w-full max-w-[1180px] px-4 pb-12 pt-7 sm:px-6">
+            <div className="mb-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#FF7628]">TAPASYA · WORLD</p>
+                <h1 className="mt-2 text-[25px] font-semibold tracking-tight text-[#eeeeee] sm:text-[30px]">The world is studying.</h1>
+                <p className="mt-2 max-w-[560px] text-[12px] leading-6 text-[#858585]">
+                  A live view of students putting in the work, one focused session at a time.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 self-start rounded-full border border-[#24452f] bg-[#14231a] px-3 py-1.5">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-[#36c477]" />
+                <span className="text-[10px] font-medium text-[#8fdaa9]">LIVE · refreshes automatically</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Studying right now</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{liveSessions.length.toLocaleString()}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Active focus sessions</p>
+              </div>
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Study time today</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{formatTime(todaySeconds)}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Combined recorded time</p>
+              </div>
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Students active today</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{uniqueStudentsToday.toLocaleString()}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Unique students with a session</p>
+              </div>
+            </div>
+
+            {worldLoading && worldSessions.length === 0 ? (
+              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-14 text-center text-[12px] text-[#777777]">
+                Loading worldwide activity…
+              </div>
+            ) : worldError ? (
+              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-12 text-center">
+                <p className="text-[12px] text-[#e6a07b]">{worldError}</p>
+                <p className="mx-auto mt-2 max-w-[600px] text-[10px] leading-5 text-[#777777]">
+                  Run the accompanying global-study-sessions.sql migration in Supabase, then refresh this page.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-8">
+                <div className="mb-4 flex items-center gap-1 rounded-xl border border-[#292929] bg-[#101010] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setWorldActivityPeriod("yesterday")}
+                    aria-pressed={worldActivityPeriod === "yesterday"}
+                    className={`flex-1 rounded-lg px-4 py-2.5 text-[12px] font-medium transition ${
+                      worldActivityPeriod === "yesterday"
+                        ? "bg-[#242424] text-white shadow-sm"
+                        : "text-[#858585] hover:bg-[#191919] hover:text-[#dddddd]"
+                    }`}
+                  >
+                    Yesterday
+                    <span className={`ml-2 text-[10px] ${worldActivityPeriod === "yesterday" ? "text-[#FF7628]" : "text-[#666666]"}`}>
+                      {yesterdayActivity.length}
+                    </span>
+                  </button>                  <button
+                    type="button"
+                    onClick={() => setWorldActivityPeriod("today")}
+                    aria-pressed={worldActivityPeriod === "today"}
+                    className={`flex-1 rounded-lg px-4 py-2.5 text-[12px] font-medium transition ${
+                      worldActivityPeriod === "today"
+                        ? "bg-[#242424] text-white shadow-sm"
+                        : "text-[#858585] hover:bg-[#191919] hover:text-[#dddddd]"
+                    }`}
+                  >
+                    Today
+                    <span className={`ml-2 text-[10px] ${worldActivityPeriod === "today" ? "text-[#FF7628]" : "text-[#666666]"}`}>
+                      {todayActivity.length}
+                    </span>
+                  </button>
+
+                </div>
+                {worldActivityPeriod === "today"
+                  ? renderActivityGroup(
+                      "Students who studied today",
+                      "Everyone who has logged a study session today",
+                      todayActivity,
+                      "No study sessions yet today."
+                    )
+                  : renderActivityGroup(
+                      "Students who studied yesterday",
+                      "Everyone who logged a study session yesterday",
+                      yesterdayActivity,
+                      "No study sessions were recorded yesterday."
+                    )}
+              </div>
+            )}
+
+            <p className="mt-4 text-[10px] leading-5 text-[#666666]">
+              Your study activity is shared on this page while your timer is running. Only your username, subject and session duration are displayed.
+            </p>
+          </section>
+        );
+      })()}
+
       {/* GROUPS */}
       {selectedTab === "Groups" && <GroupsPanel />}
+
+      {/* SHARE STUDY CARD MODAL */}
+      {shareOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-4"
+          onClick={() => setShareOpen(false)}
+        >
+          <div
+            onClick={event => event.stopPropagation()}
+            className="max-h-[94vh] w-full max-w-[380px] overflow-y-auto rounded-xl border border-[#383838] bg-[#1d1d1d] p-4 shadow-2xl"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-[14px] font-semibold text-white">Share your study card</h2>
+                <p className="mt-0.5 text-[10px] text-[#777777]">Perfect for Instagram, Snapchat & WhatsApp stories</p>
+              </div>
+              <button onClick={() => setShareOpen(false)} className="text-[#888888] hover:text-white">
+                <X size={17} />
+              </button>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-[#2b2b2b] bg-[#111111]">
+              {shareImage ? (
+                <img
+                  src={shareImage}
+                  alt="Your Tapasya study card"
+                  className="mx-auto max-h-[56vh] w-auto"
+                />
+              ) : (
+                <div className="flex h-[300px] items-center justify-center text-[11px] text-[#777777]">
+                  Creating your card…
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2">
+              {SHARE_THEMES.map(theme => (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => changeShareTheme(theme.id)}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition ${
+                    shareTheme === theme.id
+                      ? "border-white/70 bg-[#292929] text-white"
+                      : "border-[#383838] text-[#999999] hover:border-[#555555] hover:text-white"
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 rounded-full"
+                    style={{ background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent2})` }}
+                  />
+                  {theme.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={handleShareCard}
+                disabled={shareBusy || !shareImage}
+                className="flex items-center justify-center gap-2 rounded bg-[#D97736] py-2.5 text-[12px] font-medium text-white hover:bg-[#c56a30] disabled:opacity-40"
+              >
+                <Share2 size={14} /> {shareBusy ? "Sharing…" : "Share"}
+              </button>
+              <button
+                onClick={handleDownloadCard}
+                disabled={!shareImage}
+                className="flex items-center justify-center gap-2 rounded border border-[#383838] py-2.5 text-[12px] font-medium text-[#d0d0d0] hover:bg-[#292929] disabled:opacity-40"
+              >
+                <Download size={14} /> Download
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SUBJECT MODAL */}
       {subjectModal && (
@@ -1175,6 +2297,42 @@ export default function Home() {
           </div>
         </div>
       )}
+      <style jsx global>{`
+        .tapasya-theme[data-theme="light"] { background:#f5f5f4 !important; color:#242424 !important; color-scheme:light; }
+        .tapasya-theme[data-theme="light"] [class~="bg-[#111111]"] { background:#f5f5f4 !important; }
+        .tapasya-theme[data-theme="light"] [class~="bg-[#151515]"], .tapasya-theme[data-theme="light"] [class~="bg-[#191919]"], .tapasya-theme[data-theme="light"] [class~="bg-[#1a1a1a]"], .tapasya-theme[data-theme="light"] [class~="bg-[#1b1b1b]"], .tapasya-theme[data-theme="light"] [class~="bg-[#1c1c1c]"], .tapasya-theme[data-theme="light"] [class~="bg-[#202020]"], .tapasya-theme[data-theme="light"] [class~="bg-[#222222]"], .tapasya-theme[data-theme="light"] [class~="bg-[#242424]"], .tapasya-theme[data-theme="light"] [class~="bg-[#252525]"], .tapasya-theme[data-theme="light"] [class~="bg-[#292929]"], .tapasya-theme[data-theme="light"] [class~="bg-[#303030]"], .tapasya-theme[data-theme="light"] [class~="bg-[#30251f]"], .tapasya-theme[data-theme="light"] [class~="bg-[#1c1713]"] { background:#ffffff !important; }
+        .tapasya-theme[data-theme="light"] [class~="text-white"], .tapasya-theme[data-theme="light"] [class~="text-[#e5e5e5]"], .tapasya-theme[data-theme="light"] [class~="text-[#e0e0e0]"], .tapasya-theme[data-theme="light"] [class~="text-[#dddddd]"], .tapasya-theme[data-theme="light"] [class~="text-[#d0d0d0]"], .tapasya-theme[data-theme="light"] [class~="text-[#cccccc]"], .tapasya-theme[data-theme="light"] [class~="text-[#cfcfcf]"] { color:#242424 !important; }
+        .tapasya-theme[data-theme="light"] [class~="text-[#999999]"], .tapasya-theme[data-theme="light"] [class~="text-[#888888]"], .tapasya-theme[data-theme="light"] [class~="text-[#777777]"], .tapasya-theme[data-theme="light"] [class~="text-[#666666]"], .tapasya-theme[data-theme="light"] [class~="text-[#555555]"], .tapasya-theme[data-theme="light"] [class~="text-[#5f5f5f]"] { color:#737373 !important; }
+        .tapasya-theme[data-theme="light"] [class*="border-[#"] { border-color:#e5e5e5 !important; }
+        .tapasya-theme[data-theme="light"] input, .tapasya-theme[data-theme="light"] textarea, .tapasya-theme[data-theme="light"] select { background:#ffffff !important; color:#242424 !important; border-color:#d4d4d4 !important; }
+        .tapasya-theme[data-theme="amoled"] { background:#000000 !important; color:#d0d0d0 !important; color-scheme:dark; }
+
+        /* AMOLED: keep the page background true black, but give interactive
+           surfaces enough separation to remain visible. Do not flatten every
+           Tailwind background (that also erased orange buttons and message cards). */
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#111111]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#141414]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#151515]"] { background-color:#080808 !important; }
+
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#181818]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#191919]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#1b1b1b]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#1d1d1d]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#202020]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#222222]"] { background-color:#101010 !important; }
+
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#242424]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#252525]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#262626]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#292929]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#303030]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#333333]"],
+        .tapasya-theme[data-theme="amoled"] [class~="bg-[#3a3a3a]"] { background-color:#171717 !important; }
+
+        .tapasya-theme[data-theme="amoled"] [class*="border-[#"] { border-color:#242424 !important; }
+        .tapasya-theme[data-theme="amoled"] [class~="text-[#777777]"],
+        .tapasya-theme[data-theme="amoled"] [class~="text-[#666666]"] { color:#858585 !important; }
+      `}</style>
     </main>
   );
 }
