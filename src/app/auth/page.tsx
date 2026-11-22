@@ -282,14 +282,9 @@ export default function AuthPage() {
   // Render only after mount so server HTML and the first client render always
   // match (prevents hydration errors from stale HMR, extensions, etc.)
   const [mounted, setMounted] = useState(false);
-  const [introExpanded, setIntroExpanded] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const transitionTimer = window.setTimeout(() => {
-      setIntroExpanded(true);
-    }, 1500);
-    return () => window.clearTimeout(transitionTimer);
   }, []);
 
   const [screen, setScreen] = useState<Screen>("welcome");
@@ -437,7 +432,7 @@ export default function AuthPage() {
       {/* WELCOME / SPLIT INTRO SCREEN */}
       {screen === "welcome" && (
         <section className="welcome-shell relative min-h-[100svh] w-full overflow-hidden bg-[#111111]">
-          <div className={`welcome-left ${introExpanded ? "welcome-left-expanded" : ""}`}>
+          <div className="welcome-left welcome-left-expanded">
             <div className="welcome-brand">tapasya<span>.</span></div>
             <div className="welcome-art-wrap">
               <StudyScene />
@@ -447,7 +442,7 @@ export default function AuthPage() {
             </div>
           </div>
 
-          <div className={`welcome-right ${introExpanded ? "welcome-right-visible" : ""}`}>
+          <div className="welcome-right welcome-right-visible">
             <div className="welcome-copy">
               <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#ff7628]">
                 Your space to grow
@@ -523,20 +518,19 @@ export default function AuthPage() {
               width: 100%; display: flex; flex-direction: column;
               align-items: center; justify-content: center;
               padding: 34px 28px 26px; background: #111111;
-              transition: width 1.25s cubic-bezier(.76,0,.18,1),
-                padding 1.25s cubic-bezier(.76,0,.18,1);
+              transition: none;
             }
             .welcome-left-expanded { width: 50%; padding: 34px 34px 26px; }
-            .welcome-brand { position: absolute; top: 34px; left: 42px; color: #e9e4dc; font-size: 15px; font-weight: 650; letter-spacing: -.04em; opacity: 0; transition: opacity .55s ease .75s; }
+            .welcome-brand { position: absolute; top: 34px; left: 42px; color: #e9e4dc; font-size: 15px; font-weight: 650; letter-spacing: -.04em; opacity: 1; transition: none; }
             .welcome-brand span { color: #ff7628; }
             .welcome-left-expanded .welcome-brand { opacity: 1; }
-            .welcome-art-wrap { width: min(560px, 100%); display: flex; flex-direction: column; align-items: center; transform: translateY(-5px) scale(1); transition: transform 1.25s cubic-bezier(.76,0,.18,1); }
+            .welcome-art-wrap { width: min(560px, 100%); display: flex; flex-direction: column; align-items: center; transform: translateY(-3px) scale(.86); transition: none; }
             .welcome-left-expanded .welcome-art-wrap { transform: translateY(-3px) scale(.86); }
             .welcome-art-wrap :global(.scene) { width: min(560px, 94vw); }
             .welcome-left-expanded .welcome-art-wrap :global(.scene) { width: min(490px, 42vw); }
-            .welcome-left-footer { position: absolute; bottom: 28px; color: #625d56; font-size: 10px; letter-spacing: .04em; opacity: 0; transition: opacity .5s ease 1s; }
+            .welcome-left-footer { position: absolute; bottom: 28px; color: #625d56; font-size: 10px; letter-spacing: .04em; opacity: 1; transition: none; }
             .welcome-left-expanded .welcome-left-footer { opacity: 1; }
-            .welcome-right { position: absolute; inset: 0 0 0 auto; width: 50%; display: flex; flex-direction: column; justify-content: center; padding: 80px clamp(30px, 7vw, 110px) 70px; opacity: 0; transform: translateX(48px); pointer-events: none; transition: opacity .8s ease .55s, transform 1s cubic-bezier(.2,.7,.2,1) .45s; }
+            .welcome-right { position: absolute; inset: 0 0 0 auto; width: 50%; display: flex; flex-direction: column; justify-content: center; padding: 80px clamp(30px, 7vw, 110px) 70px; opacity: 1; transform: none; pointer-events: auto; transition: none; }
             .welcome-right-visible { opacity: 1; transform: translateX(0); pointer-events: auto; }
             .welcome-copy { width: 100%; max-width: 540px; }
             @media (max-width: 760px) {
@@ -544,11 +538,10 @@ export default function AuthPage() {
               .welcome-left { position: relative; width: 100%; min-height: 48svh; padding: 24px 18px 12px; }
               .welcome-left-expanded { width: 100%; min-height: 43svh; }
               .welcome-brand { top: 20px; left: 22px; }
-              .welcome-art-wrap { transform: translateY(10px) scale(.76); }
+              .welcome-art-wrap { transform: translateY(18px) scale(.62); }
               .welcome-left-expanded .welcome-art-wrap { transform: translateY(18px) scale(.62); }
               .welcome-art-wrap :global(.scene), .welcome-left-expanded .welcome-art-wrap :global(.scene) { width: min(390px, 88vw); }
-              .welcome-right { position: relative; width: 100%; min-height: 57svh; padding: 22px 26px 64px; transform: translateY(24px); }
-              .welcome-right-visible { transform: translateY(0); }
+              .welcome-right { position: relative; width: 100%; min-height: 57svh; padding: 22px 26px 64px; transform: none; }
               .welcome-copy h1 { font-size: 39px; }
               .welcome-copy > p:nth-of-type(2) { margin-top: 12px; line-height: 1.65; }
               .welcome-copy .mt-10 { margin-top: 24px; }
