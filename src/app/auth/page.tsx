@@ -534,16 +534,76 @@ export default function AuthPage() {
             .welcome-right-visible { opacity: 1; transform: translateX(0); pointer-events: auto; }
             .welcome-copy { width: 100%; max-width: 540px; }
             @media (max-width: 760px) {
-              .welcome-shell { min-height: 100svh; }
-              .welcome-left { position: relative; width: 100%; min-height: 48svh; padding: 24px 18px 12px; }
-              .welcome-left-expanded { width: 100%; min-height: 43svh; }
+              .welcome-shell {
+                min-height: 100svh;
+                height: auto;
+                display: flex;
+                flex-direction: column;
+                overflow: visible;
+              }
+              .welcome-left,
+              .welcome-left-expanded {
+                position: relative;
+                inset: auto;
+                z-index: 1;
+                flex: 0 0 auto;
+                width: 100%;
+                min-height: 0;
+                height: auto;
+                padding: 58px 18px 0;
+                justify-content: flex-start;
+              }
               .welcome-brand { top: 20px; left: 22px; }
-              .welcome-art-wrap { transform: translateY(18px) scale(.62); }
-              .welcome-left-expanded .welcome-art-wrap { transform: translateY(18px) scale(.62); }
-              .welcome-art-wrap :global(.scene), .welcome-left-expanded .welcome-art-wrap :global(.scene) { width: min(390px, 88vw); }
-              .welcome-right { position: relative; width: 100%; min-height: 57svh; padding: 22px 26px 64px; transform: none; }
-              .welcome-copy h1 { font-size: 39px; }
-              .welcome-copy > p:nth-of-type(2) { margin-top: 12px; line-height: 1.65; }
+              .welcome-art-wrap,
+              .welcome-left-expanded .welcome-art-wrap {
+                width: 100%;
+                max-width: 360px;
+                transform: none;
+                margin: 0 auto;
+              }
+              .welcome-art-wrap :global(.scene),
+              .welcome-left-expanded .welcome-art-wrap :global(.scene) {
+                width: min(270px, 72vw);
+                margin: 0 auto;
+              }
+              .welcome-art-wrap > p {
+                margin-top: 0.25rem;
+                padding-bottom: 4px;
+                font-size: 13px;
+                line-height: 1.5;
+              }
+              .welcome-right,
+              .welcome-right-visible {
+                position: relative;
+                inset: auto;
+                flex: 1 0 auto;
+                width: 100%;
+                min-height: 0;
+                padding: 28px 24px max(34px, env(safe-area-inset-bottom));
+                justify-content: flex-start;
+                transform: none;
+              }
+              .welcome-copy { max-width: 440px; margin: 0 auto; }
+              .welcome-copy > p:first-child { margin-bottom: 12px; font-size: 10px; }
+              .welcome-copy h1 { font-size: clamp(34px, 9vw, 40px); line-height: 1.08; }
+              .welcome-copy > p:nth-of-type(2) { margin-top: 12px; line-height: 1.6; font-size: 13px; }
+              .welcome-copy .mt-10 { margin-top: 22px; }
+              .welcome-copy .mt-10 button { min-height: 50px; width: 100%; }
+            }
+            @media (max-width: 380px) {
+              .welcome-left,
+              .welcome-left-expanded { padding-left: 14px; padding-right: 14px; }
+              .welcome-right,
+              .welcome-right-visible { padding-left: 20px; padding-right: 20px; }
+              .welcome-art-wrap :global(.scene),
+              .welcome-left-expanded .welcome-art-wrap :global(.scene) { width: min(238px, 68vw); }
+            }
+            @media (min-width: 761px) and (max-height: 700px) {
+              .welcome-left, .welcome-left-expanded { padding-top: 22px; padding-bottom: 18px; }
+              .welcome-art-wrap, .welcome-left-expanded .welcome-art-wrap { transform: scale(.72); }
+              .welcome-art-wrap :global(.scene),
+              .welcome-left-expanded .welcome-art-wrap :global(.scene) { width: min(390px, 36vw); }
+              .welcome-right, .welcome-right-visible { padding-top: 48px; padding-bottom: 42px; }
               .welcome-copy .mt-10 { margin-top: 24px; }
             }
             @media (prefers-reduced-motion: reduce) {
