@@ -624,6 +624,7 @@ export default function Home() {
   const hasInitializedStudySessionRef = useRef(false);
 
   const [ready, setReady] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [todayLabel, setTodayLabel] = useState("");
   const [todayKey, setTodayKey] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
@@ -681,8 +682,47 @@ export default function Home() {
     catch (error) { console.error("Could not save appearance preference:", error); }
   }, [appTheme, themeReady]);
 
+  // Require an authenticated Supabase session before mounting the dashboard.
+  // Logged-out visitors are sent to the welcome / sign-in page.
+  useEffect(() => {
+    let active = true;
+
+    const checkSession = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (!active) return;
+
+      if (error || !data.session) {
+        window.location.replace("/auth");
+        return;
+      }
+
+      setAuthReady(true);
+    };
+
+    void checkSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+
+      if (event === "SIGNED_OUT" || !session) {
+        window.location.replace("/auth");
+        return;
+      }
+
+      setAuthReady(true);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Load the signed-in user's identity for the profile menu.
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
 
     const loadProfileIdentity = async () => {
@@ -704,7 +744,7 @@ export default function Home() {
 
     void loadProfileIdentity();
     return () => { cancelled = true; };
-  }, []);
+  }, [authReady]);
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -795,6 +835,7 @@ export default function Home() {
 
   // Sync the local focus timer with Supabase so group rooms can show live study time.
   useEffect(() => {
+    if (!authReady) return;
     if (activeSubject === null && !hasInitializedStudySessionRef.current) {
       hasInitializedStudySessionRef.current = true;
       return;
@@ -870,11 +911,12 @@ export default function Home() {
     };
 
     void syncStudySession();
-  }, [activeSubject, activeSessionStartedAt]);
+  }, [activeSubject, activeSessionStartedAt, authReady]);
 
   // Publish the current timer as a global study session for the World page.
   // This is separate from group_sessions so students without groups are included too.
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
 
     const syncGlobalStudySession = async () => {
@@ -935,11 +977,11 @@ export default function Home() {
 
     void syncGlobalStudySession();
     return () => { cancelled = true; };
-  }, [activeSubject, activeSessionStartedAt, activeSubjectNameForSync]);
+  }, [activeSubject, activeSessionStartedAt, activeSubjectNameForSync, authReady]);
 
   // Load worldwide live activity and today's study sessions.
   useEffect(() => {
-    if (selectedTab !== "World") return;
+    if (!authReady || selectedTab !== "World") return;
 
     let cancelled = false;
     const loadWorldSessions = async () => {
@@ -1042,7 +1084,7 @@ export default function Home() {
       window.clearInterval(refresh);
       void supabase.removeChannel(channel);
     };
-  }, [selectedTab]);
+  }, [selectedTab, authReady]);
 
   // Study timer
   useEffect(() => {
@@ -1318,6 +1360,14 @@ export default function Home() {
       ]
     : [];
 
+
+  if (!authReady) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#080808] text-[#888888]">
+        <p className="text-sm">Loading Tapasya...</p>
+      </main>
+    );
+  }
 
   return (
     <main
