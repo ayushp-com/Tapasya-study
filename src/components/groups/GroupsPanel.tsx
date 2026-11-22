@@ -1142,7 +1142,7 @@ export default function GroupsPanel() {
             </select>
 
             <button
-              onClick={loadGroups}
+              onClick={() => loadGroups()}
               className="flex h-10 items-center justify-center rounded-md border border-[#333333] px-3 text-[#888888] hover:text-white"
               title="Refresh groups"
             >
