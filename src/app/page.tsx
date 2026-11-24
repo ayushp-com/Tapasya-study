@@ -5,8 +5,7 @@ import {
   Timer, CheckSquare, CalendarDays, Users, Plus, Play, Pause,
   MoreVertical, Pencil, Trash2, ChevronUp, ChevronDown, X,
   PanelRight, Check, ChevronLeft, ChevronRight,
-  UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast,
-  BarChart3, Activity, BookOpen, Coffee, Clock3
+  UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast
 } from "lucide-react";
 import GroupsPanel from "@/components/groups/GroupsPanel";
 import LiveStudyRoom from "@/components/LiveStudyRoom";
@@ -717,14 +716,6 @@ export default function Home() {
   const [breakOtherText, setBreakOtherText] = useState("");
   const [breakSaving, setBreakSaving] = useState(false);
 
-  // Personal analytics
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
-  const [analyticsRange, setAnalyticsRange] = useState<"today" | "7d" | "30d">("today");
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState("");
-  const [analyticsSessions, setAnalyticsSessions] = useState<any[]>([]);
-  const [appActivity, setAppActivity] = useState<any[]>([]);
-
   // Share study card
   const [shareOpen, setShareOpen] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
@@ -800,58 +791,6 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
-
-  // Track time spent inside Tapasya sections only (no browser-wide tracking).
-  // Segments are stored locally on this device and are private to this browser.
-  useEffect(() => {
-    if (!authReady) return;
-
-    let segmentStartedAt = Date.now();
-    let disposed = false;
-    const visitId = `${selectedTab}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const persistSegment = (force = false) => {
-      if (disposed || (!force && document.visibilityState === "hidden")) return;
-      const endedAt = Date.now();
-      const durationMs = Math.max(0, endedAt - segmentStartedAt);
-      segmentStartedAt = endedAt;
-      if (durationMs < 1000) return;
-
-      try {
-        const key = "tapasya-app-activity-v1";
-        const existing = JSON.parse(localStorage.getItem(key) || "[]");
-        const entries = Array.isArray(existing) ? existing : [];
-        entries.push({
-          tab: selectedTab,
-          visitId,
-          startedAt: new Date(endedAt - durationMs).toISOString(),
-          endedAt: new Date(endedAt).toISOString(),
-          durationMs,
-        });
-        localStorage.setItem(key, JSON.stringify(entries.slice(-50000)));
-      } catch (error) {
-        console.error("Could not save Tapasya app activity:", error);
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") persistSegment(true);
-      else segmentStartedAt = Date.now();
-    };
-    const handlePageHide = () => persistSegment(true);
-
-    const interval = window.setInterval(() => persistSegment(), 15000);
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("pagehide", handlePageHide);
-
-    return () => {
-      persistSegment();
-      disposed = true;
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("pagehide", handlePageHide);
-    };
-  }, [authReady, selectedTab]);
 
   // Load profile identity and exam-based subjects from Supabase.
   useEffect(() => {
@@ -1469,104 +1408,6 @@ export default function Home() {
 
   const totalSeconds = subjects.reduce((sum, s) => sum + s.seconds, 0);
 
-  async function openAnalytics() {
-    setAnalyticsLoading(true);
-    setAnalyticsError("");
-
-    try {
-      const now = new Date();
-      const from = new Date(now);
-      if (analyticsRange === "7d") from.setDate(from.getDate() - 6);
-      if (analyticsRange === "30d") from.setDate(from.getDate() - 29);
-      from.setHours(0, 0, 0, 0);
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      if (!authData.user) throw new Error("Please sign in again to view your analytics.");
-
-      const { data, error } = await supabase
-        .from("global_study_sessions")
-        .select("id, subject_name, started_at, ended_at, break_reason, end_type")
-        .eq("user_id", authData.user.id)
-        .gte("started_at", from.toISOString())
-        .order("started_at", { ascending: true })
-        .limit(2000);
-
-      if (error) throw error;
-      setAnalyticsSessions(data ?? []);
-
-      try {
-        const stored = JSON.parse(localStorage.getItem("tapasya-app-activity-v1") || "[]");
-        setAppActivity(Array.isArray(stored) ? stored : []);
-      } catch {
-        setAppActivity([]);
-      }
-    } catch (error) {
-      console.error("Could not load Tapasya analytics:", error);
-      setAnalyticsError(error instanceof Error ? error.message : "Could not load analytics.");
-      setAnalyticsSessions([]);
-    } finally {
-      setAnalyticsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (analyticsOpen) void openAnalytics();
-    // openAnalytics intentionally uses the current selected range.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsOpen, analyticsRange]);
-
-  // Derived metrics for the selected analytics period.
-  const analyticsNow = Date.now();
-  const analyticsFrom = new Date();
-  if (analyticsRange === "7d") analyticsFrom.setDate(analyticsFrom.getDate() - 6);
-  if (analyticsRange === "30d") analyticsFrom.setDate(analyticsFrom.getDate() - 29);
-  analyticsFrom.setHours(0, 0, 0, 0);
-  const analyticsFromMs = analyticsFrom.getTime();
-  const analyticsRows = analyticsSessions.filter(row => new Date(row.started_at).getTime() >= analyticsFromMs);
-  const analyticsStudyMs = analyticsRows.reduce((sum, row) => {
-    const start = new Date(row.started_at).getTime();
-    const end = row.ended_at ? new Date(row.ended_at).getTime() : analyticsNow;
-    return sum + Math.max(0, end - start);
-  }, 0);
-  const analyticsBySubject = analyticsRows.reduce((acc: Record<string, number>, row) => {
-    const start = new Date(row.started_at).getTime();
-    const end = row.ended_at ? new Date(row.ended_at).getTime() : analyticsNow;
-    const name = row.subject_name || "Study";
-    acc[name] = (acc[name] || 0) + Math.max(0, end - start);
-    return acc;
-  }, {});
-  const analyticsSorted = [...analyticsRows].sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
-  const analyticsBreaks = analyticsSorted.slice(0, -1).map((row, index) => {
-    const end = row.ended_at ? new Date(row.ended_at).getTime() : 0;
-    const nextStart = new Date(analyticsSorted[index + 1].started_at).getTime();
-    const gap = nextStart - end;
-    return { reason: row.break_reason || "Unspecified", durationMs: gap };
-  }).filter(item => item.durationMs >= 60_000 && item.durationMs <= 4 * 60 * 60 * 1000);
-  const analyticsBreakMs = analyticsBreaks.reduce((sum, item) => sum + item.durationMs, 0);
-  const analyticsBreakReasons = analyticsBreaks.reduce((acc: Record<string, number>, item) => {
-    acc[item.reason] = (acc[item.reason] || 0) + 1;
-    return acc;
-  }, {});
-  const analyticsAppEntries = appActivity.filter(entry => {
-    const at = new Date(entry.startedAt).getTime();
-    return Number.isFinite(at) && at >= analyticsFromMs;
-  });
-  const analyticsTabStats = analyticsAppEntries.reduce((acc: Record<string, { ms: number; visitIds: Set<string> }>, entry) => {
-    const name = String(entry.tab || "Unknown");
-    if (!acc[name]) acc[name] = { ms: 0, visitIds: new Set<string>() };
-    acc[name].ms += Math.max(0, Number(entry.durationMs) || 0);
-    acc[name].visitIds.add(String(entry.visitId || `${name}-${entry.startedAt}`));
-    return acc;
-  }, {});
-  const analyticsAppMs = analyticsAppEntries.reduce((sum, entry) => sum + Math.max(0, Number(entry.durationMs) || 0), 0);
-  const analyticsAverageSessionMs = analyticsRows.length ? analyticsStudyMs / analyticsRows.length : 0;
-  const formatDuration = (ms: number) => {
-    const minutes = Math.floor(Math.max(0, ms) / 60000);
-    const hours = Math.floor(minutes / 60);
-    return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-  };
-
   // SHARE STUDY CARD
   function buildShareCanvas(theme: ShareThemeId = shareTheme) {
     return drawShareCard({
@@ -1888,14 +1729,14 @@ export default function Home() {
             type="button"
             onClick={event => {
               event.stopPropagation();
-              setAnalyticsOpen(true);
+              openShare();
             }}
-            aria-label="Open daily analysis"
-            title="Daily analysis"
+            aria-label="Share your study card"
+            title="Share your study card"
             className="flex h-9 items-center gap-1.5 rounded-full border border-[#303030] bg-[#191919] px-3 text-[#cfcfcf] transition hover:border-[#FF7628]/60 hover:bg-[#242424] hover:text-white"
           >
-            <BarChart3 size={14} className="text-[#FF7628]" />
-            <span className="hidden text-[11px] font-medium sm:block">Analysis</span>
+            <Share2 size={14} className="text-[#FF7628]" />
+            <span className="hidden text-[11px] font-medium sm:block">Share</span>
           </button>
 
           <div className="relative shrink-0">
@@ -2593,128 +2434,78 @@ export default function Home() {
       {/* GROUPS */}
       {selectedTab === "Groups" && <GroupsPanel />}
 
-      {/* PERSONAL ANALYTICS */}
-      {analyticsOpen && (
+      {/* SHARE STUDY CARD MODAL */}
+      {shareOpen && (
         <div
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 px-3 py-4 backdrop-blur-sm"
-          onClick={() => setAnalyticsOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-4"
+          onClick={() => setShareOpen(false)}
         >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="analytics-title"
+          <div
             onClick={event => event.stopPropagation()}
-            className="max-h-[92vh] w-full max-w-[760px] overflow-y-auto rounded-2xl border border-[#333] bg-[#111] p-4 shadow-2xl sm:p-6"
+            className="max-h-[94vh] w-full max-w-[380px] overflow-y-auto rounded-xl border border-[#383838] bg-[#1d1d1d] p-4 shadow-2xl"
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="mb-3 flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#FF7628]">Tapasya · Personal insights</p>
-                <h2 id="analytics-title" className="mt-1 text-xl font-semibold text-white sm:text-2xl">Your day, understood.</h2>
-                <p className="mt-1 text-xs text-[#888]">Study, breaks and how you used Tapasya. Only your app activity is tracked.</p>
+                <h2 className="text-[14px] font-semibold text-white">Share your study card</h2>
+                <p className="mt-0.5 text-[10px] text-[#777777]">Perfect for Instagram, Snapchat & WhatsApp stories</p>
               </div>
-              <button type="button" onClick={() => setAnalyticsOpen(false)} aria-label="Close analysis" className="rounded-lg p-2 text-[#888] hover:bg-[#252525] hover:text-white"><X size={18}/></button>
+              <button onClick={() => setShareOpen(false)} className="text-[#888888] hover:text-white">
+                <X size={17} />
+              </button>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {([{id:"today",label:"Today"},{id:"7d",label:"7 days"},{id:"30d",label:"30 days"}] as const).map(option => (
-                <button key={option.id} type="button" onClick={() => setAnalyticsRange(option.id)}
-                  className={`rounded-full border px-3 py-1.5 text-[11px] transition ${analyticsRange === option.id ? "border-[#FF7628] bg-[#FF7628]/10 text-[#ffad7a]" : "border-[#333] text-[#888] hover:text-white"}`}>
-                  {option.label}
+            <div className="overflow-hidden rounded-lg border border-[#2b2b2b] bg-[#111111]">
+              {shareImage ? (
+                <img
+                  src={shareImage}
+                  alt="Your Tapasya study card"
+                  className="mx-auto max-h-[56vh] w-auto"
+                />
+              ) : (
+                <div className="flex h-[300px] items-center justify-center text-[11px] text-[#777777]">
+                  Creating your card…
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2">
+              {SHARE_THEMES.map(theme => (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => changeShareTheme(theme.id)}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition ${
+                    shareTheme === theme.id
+                      ? "border-white/70 bg-[#292929] text-white"
+                      : "border-[#383838] text-[#999999] hover:border-[#555555] hover:text-white"
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 rounded-full"
+                    style={{ background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent2})` }}
+                  />
+                  {theme.label}
                 </button>
               ))}
             </div>
 
-            {analyticsLoading ? (
-              <div className="flex h-48 items-center justify-center text-sm text-[#888]">Preparing your insights…</div>
-            ) : analyticsError ? (
-              <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/20 p-4 text-sm text-red-200">
-                {analyticsError}
-                <button type="button" onClick={() => void openAnalytics()} className="ml-2 underline">Try again</button>
-              </div>
-            ) : (
-              <>
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                  {[
-                    {label:"Study time",value:formatDuration(analyticsStudyMs),icon:BookOpen},
-                    {label:"Break time",value:formatDuration(analyticsBreakMs),icon:Coffee},
-                    {label:"Study sessions",value:String(analyticsRows.length),icon:Activity},
-                    {label:"Breaks",value:String(analyticsBreaks.length),icon:Coffee},
-                    {label:"Avg. session",value:formatDuration(analyticsAverageSessionMs),icon:Clock3},
-                    {label:"Tapasya time",value:formatDuration(analyticsAppMs),icon:BarChart3},
-                  ].map(metric => (
-                    <div key={metric.label} className="rounded-xl border border-[#292929] bg-[#191919] p-3">
-                      <metric.icon size={16} className="text-[#FF7628]"/>
-                      <p className="mt-2 text-lg font-semibold text-white">{metric.value}</p>
-                      <p className="text-[10px] text-[#858585]">{metric.label}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-[#292929] bg-[#171717] p-4">
-                    <h3 className="text-sm font-semibold text-white">Subject breakdown</h3>
-                    {Object.keys(analyticsBySubject).length ? (
-                      <div className="mt-3 space-y-3">
-                        {Object.entries(analyticsBySubject).sort((a,b) => b[1]-a[1]).map(([name, ms]) => {
-                          const pct = analyticsStudyMs ? Math.round((ms / analyticsStudyMs) * 100) : 0;
-                          return <div key={name}>
-                            <div className="mb-1 flex justify-between text-xs"><span className="text-[#ccc]">{name}</span><span className="text-[#888]">{formatDuration(ms)} · {pct}%</span></div>
-                            <div className="h-1.5 overflow-hidden rounded-full bg-[#303030]"><div className="h-full rounded-full bg-[#FF7628]" style={{width:`${pct}%`}}/></div>
-                          </div>;
-                        })}
-                      </div>
-                    ) : <p className="mt-3 text-xs text-[#777]">No study sessions recorded for this period yet.</p>}
-                  </div>
-
-                  <div className="rounded-xl border border-[#292929] bg-[#171717] p-4">
-                    <h3 className="text-sm font-semibold text-white">Break reasons</h3>
-                    {Object.keys(analyticsBreakReasons).length ? (
-                      <div className="mt-3 space-y-2">
-                        {Object.entries(analyticsBreakReasons).sort((a,b) => b[1]-a[1]).map(([reason,count]) => (
-                          <div key={reason} className="flex items-center justify-between gap-3 text-xs">
-                            <span className="text-[#bbb]">{reason}</span><span className="text-[#FF9A5C]">{count} {count === 1 ? "break" : "breaks"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : <p className="mt-3 text-xs text-[#777]">Break reasons will appear after you stop a session and save a reason.</p>}
-                    <p className="mt-3 text-[10px] leading-4 text-[#666]">Break duration is estimated from the gap between consecutive study sessions (up to 4 hours). It is not a stopwatch running during breaks.</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-xl border border-[#292929] bg-[#171717] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-white">Tapasya section usage</h3>
-                    <span className="text-[10px] text-[#777]">This browser only</span>
-                  </div>
-                  {Object.keys(analyticsTabStats).length ? (
-                    <div className="mt-3 space-y-3">
-                      {Object.entries(analyticsTabStats).sort((a,b) => b[1].ms-a[1].ms).map(([name, stats]) => (
-                        <div key={name} className="flex items-center justify-between gap-3 text-xs">
-                          <div><p className="text-[#ddd]">{name}</p><p className="mt-0.5 text-[10px] text-[#777]">{stats.visitIds.size} visits</p></div>
-                          <span className="font-mono text-[#ff9a5c]">{formatDuration(stats.ms)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="mt-3 text-xs text-[#777]">Section usage starts collecting from this update.</p>}
-                  <p className="mt-3 text-[10px] leading-4 text-[#666]">Counts visits and time in Timer, To-Do, Calendar, Groups and World. It does not read Chrome tabs or other websites.</p>
-                </div>
-
-                <div className="mt-4 rounded-xl border border-[#292929] bg-[#171717] p-4">
-                  <h3 className="text-sm font-semibold text-white">Recent study sessions</h3>
-                  {analyticsSorted.length ? (
-                    <div className="mt-3 divide-y divide-[#292929]">
-                      {[...analyticsSorted].reverse().slice(0,12).map((row, index) => (
-                        <div key={`${row.id || row.started_at}-${index}`} className="flex items-center justify-between gap-3 py-2 text-xs">
-                          <div className="min-w-0"><p className="truncate text-[#ddd]">{row.subject_name || "Study session"}</p><p className="mt-0.5 text-[10px] text-[#777]">{new Date(row.started_at).toLocaleString()}</p></div>
-                          <span className="shrink-0 font-mono text-[#aaa]">{formatDuration(Math.max(0, (row.ended_at ? new Date(row.ended_at).getTime() : analyticsNow) - new Date(row.started_at).getTime()))}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="mt-3 text-xs text-[#777]">Your future sessions will show here.</p>}
-                </div>
-              </>
-            )}
-          </section>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                onClick={handleShareCard}
+                disabled={shareBusy || !shareImage}
+                className="flex items-center justify-center gap-2 rounded bg-[#D97736] py-2.5 text-[12px] font-medium text-white hover:bg-[#c56a30] disabled:opacity-40"
+              >
+                <Share2 size={14} /> {shareBusy ? "Sharing…" : "Share"}
+              </button>
+              <button
+                onClick={handleDownloadCard}
+                disabled={!shareImage}
+                className="flex items-center justify-center gap-2 rounded border border-[#383838] py-2.5 text-[12px] font-medium text-[#d0d0d0] hover:bg-[#292929] disabled:opacity-40"
+              >
+                <Download size={14} /> Download
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
