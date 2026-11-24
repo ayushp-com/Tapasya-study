@@ -740,6 +740,10 @@ export default function Home() {
   const [worldLoading, setWorldLoading] = useState(false);
   const [worldError, setWorldError] = useState("");
 
+  // Today's personal totals use the same global session records as the World page.
+  const [todayStudySessions, setTodayStudySessions] = useState<WorldStudySession[]>([]);
+  const [dailyNow, setDailyNow] = useState(0);
+
   const [subjectModal, setSubjectModal] = useState(false);
   const [editingSubjectId, setEditingSubjectId] = useState<number | null>(null);
   const [subjectName, setSubjectName] = useState("");
@@ -1409,6 +1413,64 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [authReady, selectedTab, analyticsRange, analyticsRefresh]);
 
+  // Load this user's sessions for today. The Timer page uses this same source
+  // as World, so its daily total cannot drift from the World daily total.
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+
+    const loadTodayStudySessions = async () => {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user || cancelled) {
+        if (authError) console.error("Could not identify user for today's study total:", authError);
+        return;
+      }
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { data, error } = await supabase
+        .from("global_study_sessions")
+        .select("id, user_id, username, subject_name, started_at, ended_at")
+        .eq("user_id", authData.user.id)
+        .gte("started_at", todayStart.toISOString())
+        .order("started_at", { ascending: true })
+        .limit(2000);
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Could not load today's Timer study sessions:", error);
+        return;
+      }
+      setTodayStudySessions((data ?? []) as WorldStudySession[]);
+    };
+
+    void loadTodayStudySessions();
+    const refresh = window.setInterval(() => { void loadTodayStudySessions(); }, 15000);
+    const channel = supabase
+      .channel("tapasya-timer-daily-study")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "global_study_sessions",
+      }, () => { void loadTodayStudySessions(); })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(refresh);
+      void supabase.removeChannel(channel);
+    };
+  }, [authReady]);
+
+  // Re-render elapsed durations every second without writing to the database.
+  useEffect(() => {
+    // Read the clock after mount so server and client render the same initial state.
+    setDailyNow(Date.now());
+
+    const interval = window.setInterval(() => setDailyNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   // Load worldwide live activity and today's study sessions.
   useEffect(() => {
     if (!authReady || selectedTab !== "World") return;
@@ -1534,6 +1596,18 @@ export default function Home() {
   }, [activeSubject]);
 
   const totalSeconds = subjects.reduce((sum, s) => sum + s.seconds, 0);
+
+  // Match World: sum today's global sessions, using the current time for open sessions.
+  const dailySubjectSeconds = todayStudySessions.reduce((totals, session) => {
+    const startedAt = new Date(session.started_at).getTime();
+    const endedAt = session.ended_at ? new Date(session.ended_at).getTime() : dailyNow;
+    const seconds = Math.max(0, Math.floor((Math.min(endedAt, dailyNow) - startedAt) / 1000));
+    const key = (session.subject_name || "Study session").trim().toLowerCase();
+    totals[key] = (totals[key] || 0) + seconds;
+    return totals;
+  }, {} as Record<string, number>);
+  const dailyTotalSeconds = Object.values(dailySubjectSeconds).reduce((sum, seconds) => sum + seconds, 0);
+  const dailySecondsForSubject = (name: string) => dailySubjectSeconds[name.trim().toLowerCase()] || 0;
 
   // SHARE STUDY CARD
   function buildShareCanvas(theme: ShareThemeId = shareTheme) {
@@ -2018,16 +2092,16 @@ export default function Home() {
                   <>
                     <div className="flex h-[38px] items-center gap-3 px-4 text-[12px] text-[#c9c9c9]">
                       <span className="font-semibold">{runningSubject?.name ?? "Study session"}</span>
-                      <span className="font-mono tabular-nums">{formatTime(runningSubject?.seconds ?? totalSeconds)}</span>
+                      <span className="font-mono tabular-nums">{formatTime(runningSubject ? dailySecondsForSubject(runningSubject.name) : dailyTotalSeconds)}</span>
                       <div className="flex-1" />
                     </div>
                     <section className="mx-3 mb-2 flex min-h-[94px] items-center justify-between rounded-xl bg-[#151515] px-4 py-3">
                       <div>
                         <p className="text-[11px] font-medium text-[#cccccc]">Total focus time</p>
-                        <p className="mt-1 font-mono text-[32px] font-semibold leading-none tracking-tight text-[#e6e6e6]">{formatTime(totalSeconds)}</p>
+                        <p className="mt-1 font-mono text-[32px] font-semibold leading-none tracking-tight text-[#e6e6e6]">{formatTime(dailyTotalSeconds)}</p>
                       </div>
                       <div className="text-right">
-                        <p className="font-mono text-[12px] text-[#FF7628]">{formatTime(runningSubject?.seconds ?? totalSeconds)}</p>
+                        <p className="font-mono text-[12px] text-[#FF7628]">{formatTime(runningSubject ? dailySecondsForSubject(runningSubject.name) : dailyTotalSeconds)}</p>
                         <p className="mt-1 text-[9px] text-[#777777]">{runningSubject?.name ?? "STUDYING"}</p>
                       </div>
                     </section>
@@ -2057,7 +2131,7 @@ export default function Home() {
 
             <div className="absolute left-1/2 top-[62px] -translate-x-1/2 text-center">
               <p className="font-mono text-[38px] font-semibold tracking-tight text-[#e6e6e6] sm:text-[40px]">
-                {formatTime(totalSeconds)}
+                {formatTime(dailyTotalSeconds)}
               </p>
             </div>
           </section>
@@ -2084,7 +2158,7 @@ export default function Home() {
                 <div className="flex-1" />
 
                 <span className="font-mono text-[13px] tabular-nums text-[#c5c5c5]">
-                  {formatTime(subject.seconds)}
+                  {formatTime(dailySecondsForSubject(subject.name))}
                 </span>
 
                 <div className="relative ml-2">
@@ -2378,7 +2452,7 @@ export default function Home() {
 
         const getSessionSeconds = (session: WorldStudySession) => {
           const start = new Date(session.started_at).getTime();
-          const end = session.ended_at ? new Date(session.ended_at).getTime() : Date.now();
+          const end = session.ended_at ? new Date(session.ended_at).getTime() : dailyNow;
           return Math.max(0, Math.floor((end - start) / 1000));
         };
 
