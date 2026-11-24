@@ -5,7 +5,8 @@ import {
   Timer, CheckSquare, CalendarDays, Users, Plus, Play, Pause,
   MoreVertical, Pencil, Trash2, ChevronUp, ChevronDown, X,
   PanelRight, Check, ChevronLeft, ChevronRight,
-  UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast
+  UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast,
+  BarChart3, Activity, BookOpen, Coffee, Clock3, RefreshCw
 } from "lucide-react";
 import GroupsPanel from "@/components/groups/GroupsPanel";
 import LiveStudyRoom from "@/components/LiveStudyRoom";
@@ -722,6 +723,17 @@ export default function Home() {
   const [shareImage, setShareImage] = useState("");
   const [shareTheme, setShareTheme] = useState<ShareThemeId>("ember");
 
+  // Personal analytics: recorded focus sessions + device-local in-app navigation.
+  const [analyticsRange, setAnalyticsRange] = useState<"today" | "7d" | "30d">("today");
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [analyticsSessions, setAnalyticsSessions] = useState<Array<{
+    id: string; subject_name: string; started_at: string; ended_at: string | null;
+    break_reason?: string | null; end_type?: string | null;
+  }>>([]);
+  const [appActivity, setAppActivity] = useState<Array<{ tab: string; at: string }>>([]);
+  const [analyticsRefresh, setAnalyticsRefresh] = useState(0);
+
   // World page: live public study activity (opt-in visibility is enforced by RLS).
   const [worldSessions, setWorldSessions] = useState<WorldStudySession[]>([]);
   const [worldLoading, setWorldLoading] = useState(false);
@@ -1282,6 +1294,120 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [authReady]);
 
+
+  // Record in-app navigation locally. This tracks Tapasya sections, not browser tabs.
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    const recordTabVisit = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled || !data.user) return;
+      const key = `tapasya-app-activity:${data.user.id}`;
+      try {
+        const raw = localStorage.getItem(key);
+        const previous = raw ? JSON.parse(raw) : [];
+        const events = Array.isArray(previous) ? previous : [];
+        const next = [...events, { tab: selectedTab, at: new Date().toISOString() }].slice(-3000);
+        localStorage.setItem(key, JSON.stringify(next));
+        setAppActivity(next);
+      } catch (error) {
+        console.error("Could not record app navigation:", error);
+      }
+    };
+    void recordTabVisit();
+    return () => { cancelled = true; };
+  }, [authReady, selectedTab]);
+
+  // Load this user's focus sessions for the selected analytics period.
+  useEffect(() => {
+    if (!authReady || selectedTab !== "Analysis") return;
+    let cancelled = false;
+    const loadPersonalAnalytics = async () => {
+      setAnalyticsLoading(true);
+      setAnalyticsError("");
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) {
+        if (!cancelled) {
+          setAnalyticsError("Could not verify your account. Please refresh and try again.");
+          setAnalyticsLoading(false);
+        }
+        return;
+      }
+
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      if (analyticsRange !== "today") start.setDate(start.getDate() - (analyticsRange === "7d" ? 6 : 29));
+
+      try {
+        const [{ data: sessions, error: sessionError }, { data: legacySessions, error: legacyError }] = await Promise.all([
+          supabase
+            .from("global_study_sessions")
+            .select("id, subject_name, started_at, ended_at, break_reason, end_type")
+            .eq("user_id", authData.user.id)
+            .gte("started_at", start.toISOString())
+            .order("started_at", { ascending: true })
+            .limit(2000),
+          supabase
+            .from("study_sessions")
+            .select("id, started_at, ended_at")
+            .eq("user_id", authData.user.id)
+            .gte("started_at", start.toISOString())
+            .order("started_at", { ascending: true })
+            .limit(2000)
+        ]);
+
+        if (sessionError) throw sessionError;
+        if (legacyError) console.warn("Could not load older group study history:", legacyError);
+        if (cancelled) return;
+
+        const key = `tapasya-app-activity:${authData.user.id}`;
+        let localEvents: Array<{ tab: string; at: string }> = [];
+        try {
+          const raw = localStorage.getItem(key);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed)) localEvents = parsed.filter(
+            (item: any) => item && typeof item.tab === "string" && typeof item.at === "string"
+          );
+        } catch (storageError) {
+          console.warn("Could not read local app activity:", storageError);
+        }
+
+        const combinedSessions = [
+          ...((sessions ?? []) as typeof analyticsSessions),
+          ...((legacySessions ?? []).map(row => ({
+            id: `legacy-${row.id}`,
+            subject_name: "Study session",
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+            break_reason: null,
+            end_type: null,
+          })))
+        ];
+        const uniqueSessions = new Map<string, typeof combinedSessions[number]>();
+        combinedSessions.forEach(session => {
+          const key = `${session.started_at}:${session.ended_at ?? "active"}`;
+          const existing = uniqueSessions.get(key);
+          if (!existing || (existing.id.startsWith("legacy-") && !session.id.startsWith("legacy-"))) {
+            uniqueSessions.set(key, session);
+          }
+        });
+        setAnalyticsSessions(Array.from(uniqueSessions.values()).sort(
+          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+        ));
+        setAppActivity(localEvents);
+      } catch (error) {
+        console.error("Could not load personal analytics:", error);
+        if (!cancelled) setAnalyticsError("Study history could not be loaded. Check your Supabase connection and try again.");
+      } finally {
+        if (!cancelled) setAnalyticsLoading(false);
+      }
+    };
+
+    void loadPersonalAnalytics();
+    return () => { cancelled = true; };
+  }, [authReady, selectedTab, analyticsRange, analyticsRefresh]);
+
   // Load worldwide live activity and today's study sessions.
   useEffect(() => {
     if (!authReady || selectedTab !== "World") return;
@@ -1433,13 +1559,6 @@ export default function Home() {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  function openShare() {
-    setShareOpen(true);
-    setShareImage("");
-    const canvas = buildShareCanvas();
-    if (canvas) setShareImage(canvas.toDataURL("image/png"));
   }
 
   function changeShareTheme(theme: ShareThemeId) {
@@ -1724,19 +1843,21 @@ export default function Home() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {/* SHARE STUDY CARD BUTTON */}
+          {/* PERSONAL ANALYSIS */}
           <button
             type="button"
-            onClick={event => {
-              event.stopPropagation();
-              openShare();
-            }}
-            aria-label="Share your study card"
-            title="Share your study card"
-            className="flex h-9 items-center gap-1.5 rounded-full border border-[#303030] bg-[#191919] px-3 text-[#cfcfcf] transition hover:border-[#FF7628]/60 hover:bg-[#242424] hover:text-white"
+            onClick={event => { event.stopPropagation(); setSelectedTab("Analysis"); }}
+            aria-label="Open personal analysis"
+            title="Your study analysis"
+            aria-pressed={selectedTab === "Analysis"}
+            className={`flex h-9 items-center gap-1.5 rounded-full border px-3 transition ${
+              selectedTab === "Analysis"
+                ? "border-[#FF7628]/60 bg-[#2b211b] text-[#FF9A5C]"
+                : "border-[#303030] bg-[#191919] text-[#cfcfcf] hover:border-[#FF7628]/60 hover:bg-[#242424] hover:text-white"
+            }`}
           >
-            <Share2 size={14} className="text-[#FF7628]" />
-            <span className="hidden text-[11px] font-medium sm:block">Share</span>
+            <BarChart3 size={14} className="text-[#FF7628]" />
+            <span className="text-[11px] font-medium">Analysis</span>
           </button>
 
           <div className="relative shrink-0">
@@ -2427,6 +2548,179 @@ export default function Home() {
             <p className="mt-4 text-[10px] leading-5 text-[#666666]">
               Your study activity is shared on this page while your timer is running. Only your username, subject and session duration are displayed.
             </p>
+          </section>
+        );
+      })()}
+
+
+      {/* PERSONAL ANALYSIS */}
+      {selectedTab === "Analysis" && (() => {
+        const now = new Date();
+        const periodStart = new Date(now);
+        periodStart.setHours(0, 0, 0, 0);
+        if (analyticsRange !== "today") periodStart.setDate(periodStart.getDate() - (analyticsRange === "7d" ? 6 : 29));
+        const durationFor = (session: typeof analyticsSessions[number]) => {
+          const started = new Date(session.started_at).getTime();
+          const ended = session.ended_at ? new Date(session.ended_at).getTime() : now.getTime();
+          return Math.max(0, Math.floor((Math.min(ended, now.getTime()) - Math.max(started, periodStart.getTime())) / 1000));
+        };
+        const validSessions = analyticsSessions.filter(session => new Date(session.started_at).getTime() <= now.getTime());
+        const totalStudySeconds = validSessions.reduce((sum, session) => sum + durationFor(session), 0);
+        const subjectTotals = validSessions.reduce((map, session) => {
+          const name = session.subject_name || "Study session";
+          map.set(name, (map.get(name) || 0) + durationFor(session));
+          return map;
+        }, new Map<string, number>());
+        const subjectRows = Array.from(subjectTotals.entries()).sort((a, b) => b[1] - a[1]);
+        const studyDays = new Set(validSessions.map(session => dateKey(new Date(session.started_at)))).size;
+        const tabEvents = appActivity.filter(event => {
+          const at = new Date(event.at).getTime();
+          return Number.isFinite(at) && at >= periodStart.getTime() && at <= now.getTime();
+        });
+        const tabCounts = tabEvents.reduce((map, event) => {
+          map.set(event.tab, (map.get(event.tab) || 0) + 1);
+          return map;
+        }, new Map<string, number>());
+        const tabRows = Array.from(tabCounts.entries()).sort((a, b) => b[1] - a[1]);
+        const dailyRows = Array.from({ length: analyticsRange === "today" ? 1 : analyticsRange === "7d" ? 7 : 30 }, (_, index) => {
+          const day = new Date(periodStart);
+          day.setDate(periodStart.getDate() + index);
+          const key = dateKey(day);
+          const seconds = validSessions.reduce((sum, session) =>
+            dateKey(new Date(session.started_at)) === key ? sum + durationFor(session) : sum, 0);
+          return { key, label: day.toLocaleDateString("en-US", { weekday: "short", day: "numeric" }), seconds };
+        });
+        const maxDaily = Math.max(1, ...dailyRows.map(row => row.seconds));
+        const orderedSessions = [...validSessions].sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+        const breakGaps = orderedSessions.slice(1).map((session, index) => {
+          const previous = orderedSessions[index];
+          if (!previous.ended_at) return null;
+          if (dateKey(new Date(previous.ended_at)) !== dateKey(new Date(session.started_at))) return null;
+          const gap = new Date(session.started_at).getTime() - new Date(previous.ended_at).getTime();
+          if (gap <= 0 || gap > 12 * 60 * 60 * 1000) return null;
+          return { seconds: Math.floor(gap / 1000), reason: previous.break_reason || "Reason not specified", start: previous.ended_at, end: session.started_at };
+        }).filter((item): item is { seconds: number; reason: string; start: string; end: string } => item !== null);
+        const estimatedBreakSeconds = breakGaps.reduce((sum, gap) => sum + gap.seconds, 0);
+        const formatCompact = (seconds: number) => {
+          const h = Math.floor(seconds / 3600);
+          const m = Math.floor((seconds % 3600) / 60);
+          return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        };
+        const periodLabel = analyticsRange === "today" ? "Today" : analyticsRange === "7d" ? "Last 7 days" : "Last 30 days";
+
+        return (
+          <section className="mx-auto w-full max-w-[1180px] px-4 pb-14 pt-7 sm:px-6">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#FF7628]">TAPASYA · PERSONAL INSIGHTS</p>
+                <h1 className="mt-2 text-[26px] font-semibold tracking-tight text-[#eeeeee] sm:text-[32px]">Your day, in focus.</h1>
+                <p className="mt-2 max-w-[560px] text-[12px] leading-6 text-[#858585]">A clear picture of your study sessions and how you move through Tapasya.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg border border-[#303030] bg-[#151515] p-1">
+                  {(["today", "7d", "30d"] as const).map(range => (
+                    <button key={range} type="button" onClick={() => setAnalyticsRange(range)} aria-pressed={analyticsRange === range}
+                      className={`rounded-md px-3 py-2 text-[11px] font-medium transition ${analyticsRange === range ? "bg-[#292929] text-white" : "text-[#858585] hover:text-white"}`}>
+                      {range === "today" ? "Today" : range === "7d" ? "7 days" : "30 days"}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" onClick={() => setAnalyticsRefresh(value => value + 1)} title="Refresh analytics" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#303030] bg-[#151515] text-[#999] hover:text-white"><RefreshCw size={14} /></button>
+              </div>
+            </div>
+
+            {analyticsLoading ? (
+              <div className="rounded-xl border border-[#292929] bg-[#151515] px-5 py-16 text-center text-[12px] text-[#888]">Preparing your insights…</div>
+            ) : analyticsError ? (
+              <div className="rounded-xl border border-[#553626] bg-[#1c1713] px-5 py-10 text-center">
+                <p className="text-[13px] text-[#ffad7a]">{analyticsError}</p>
+                <button type="button" onClick={() => setAnalyticsRefresh(value => value + 1)} className="mt-4 rounded-lg bg-[#D97736] px-4 py-2 text-[11px] font-semibold text-black">Try again</button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  {[
+                    { label: "FOCUS TIME", value: formatCompact(totalStudySeconds), hint: `${validSessions.length} recorded sessions`, Icon: Clock3 },
+                    { label: "SESSIONS", value: String(validSessions.length), hint: `${studyDays} ${studyDays === 1 ? "day" : "days"} with study`, Icon: Activity },
+                    { label: "SUBJECTS", value: String(subjectRows.length), hint: subjectRows[0]?.[0] || "No subject data yet", Icon: BookOpen },
+                    { label: "APP SECTION VISITS", value: String(tabEvents.length), hint: `${tabRows.length} different sections visited`, Icon: BarChart3 },
+                  ].map(({ label, value, hint, Icon }) => (
+                    <div key={label} className="rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                      <div className="flex items-center justify-between"><p className="text-[9px] font-semibold tracking-[0.16em] text-[#777]">{label}</p><Icon size={15} className="text-[#FF7628]" /></div>
+                      <p className="mt-3 font-mono text-[25px] font-semibold tracking-tight text-white">{value}</p>
+                      <p className="mt-1 truncate text-[10px] text-[#777]">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.35fr_1fr]">
+                  <div className="rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                    <div className="mb-5 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold text-white">Study rhythm</h2><p className="mt-1 text-[10px] text-[#777]">{periodLabel} · recorded focus time</p></div><Activity size={16} className="text-[#FF7628]" /></div>
+                    {totalStudySeconds === 0 ? <p className="py-10 text-center text-[11px] text-[#777]">No recorded study sessions in this period yet.</p> : (
+                      <div className="flex h-[170px] items-end gap-1.5 overflow-x-auto pb-1">
+                        {dailyRows.map(row => (
+                          <div key={row.key} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2">
+                            <div className="flex h-[132px] w-full items-end justify-center"><div title={`${row.label}: ${formatCompact(row.seconds)}`} className="w-full max-w-[34px] rounded-t-md bg-[#D97736] transition-all" style={{ height: `${row.seconds ? Math.max(4, row.seconds / maxDaily * 100) : 2}%`, opacity: row.seconds ? 1 : 0.18 }} /></div>
+                            <span className="text-[9px] text-[#777]">{analyticsRange === "today" ? "Today" : row.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                    <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold text-white">Subject breakdown</h2><p className="mt-1 text-[10px] text-[#777]">Where your focus went</p></div><BookOpen size={16} className="text-[#FF7628]" /></div>
+                    {subjectRows.length === 0 ? <p className="py-10 text-center text-[11px] text-[#777]">Subject insights will appear after a study session.</p> : (
+                      <div className="space-y-4">{subjectRows.map(([name, seconds], index) => (
+                        <div key={name}>
+                          <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px]"><span className="truncate text-[#d8d8d8]">{name}</span><span className="shrink-0 font-mono text-[#aaa]">{formatCompact(seconds)}</span></div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-[#292929]"><div className="h-full rounded-full bg-[#D97736]" style={{ width: `${Math.max(1, seconds / Math.max(1, totalStudySeconds) * 100)}%`, opacity: Math.max(0.45, 1 - index * 0.08) }} /></div>
+                        </div>
+                      ))}</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                    <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold text-white">Tapasya sections</h2><p className="mt-1 text-[10px] text-[#777]">Times each in-app section was opened on this device</p></div><BarChart3 size={16} className="text-[#FF7628]" /></div>
+                    {tabRows.length === 0 ? <p className="py-8 text-center text-[11px] text-[#777]">Your section visits will be counted from now on.</p> : (
+                      <div className="space-y-3">{tabRows.map(([tab, count]) => (
+                        <div key={tab} className="flex items-center justify-between rounded-lg bg-[#1d1d1d] px-3 py-2.5"><span className="text-[11px] text-[#d0d0d0]">{tab}</span><span className="font-mono text-[11px] text-[#FF9A5C]">{count} {count === 1 ? "visit" : "visits"}</span></div>
+                      ))}</div>
+                    )}
+                    <p className="mt-3 text-[9px] leading-4 text-[#666]">Counts Timer, To-Do, Calendar, Groups, World and Analysis visits inside Tapasya—not browser tabs or other websites. Stored on this device.</p>
+                  </div>
+
+                  <div className="rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                    <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold text-white">Breaks & recovery</h2><p className="mt-1 text-[10px] text-[#777]">Time between consecutive recorded sessions</p></div><Coffee size={16} className="text-[#FF7628]" /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-[#1d1d1d] p-3"><p className="text-[9px] text-[#777]">ESTIMATED GAP TIME</p><p className="mt-2 font-mono text-[20px] text-white">{formatCompact(estimatedBreakSeconds)}</p></div>
+                      <div className="rounded-lg bg-[#1d1d1d] p-3"><p className="text-[9px] text-[#777]">GAPS FOUND</p><p className="mt-2 font-mono text-[20px] text-white">{breakGaps.length}</p></div>
+                    </div>
+                    {breakGaps.length > 0 ? <div className="mt-3 space-y-2">
+                      {breakGaps.slice(-4).reverse().map((gap, index) => (
+                        <div key={`${gap.start}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#292929] py-2 text-[10px]">
+                          <div className="min-w-0"><p className="truncate text-[#d0d0d0]">{gap.reason}</p><p className="mt-0.5 text-[#666]">{new Date(gap.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – {new Date(gap.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p></div>
+                          <span className="shrink-0 font-mono text-[#aaa]">{formatCompact(gap.seconds)}</span>
+                        </div>
+                      ))}
+                    </div> : <p className="mt-4 py-4 text-center text-[10px] text-[#777]">Break gaps appear after you stop a session and start another. Gap time is an estimate, not a verified break timer.</p>}
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-[#292929] bg-[#151515] p-4 sm:p-5">
+                  <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold text-white">Recent focus sessions</h2><p className="mt-1 text-[10px] text-[#777]">Your recorded sessions in {periodLabel.toLowerCase()}</p></div><Clock3 size={16} className="text-[#FF7628]" /></div>
+                  {validSessions.length === 0 ? <p className="py-8 text-center text-[11px] text-[#777]">No sessions recorded in this period.</p> : (
+                    <div className="divide-y divide-[#292929]">{[...validSessions].reverse().slice(0, 12).map(session => (
+                      <div key={session.id} className="flex items-center justify-between gap-3 py-3">
+                        <div className="min-w-0"><p className="truncate text-[11px] font-medium text-[#ddd]">{session.subject_name || "Study session"}</p><p className="mt-1 text-[9px] text-[#777]">{new Date(session.started_at).toLocaleDateString()} · {new Date(session.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{session.ended_at ? ` – ${new Date(session.ended_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : " · In progress"}</p></div>
+                        <span className="shrink-0 font-mono text-[11px] text-[#FF9A5C]">{formatCompact(durationFor(session))}</span>
+                      </div>
+                    ))}</div>
+                  )}
+                </div>
+              </>
+            )}
           </section>
         );
       })()}
