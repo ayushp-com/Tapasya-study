@@ -863,6 +863,30 @@ export default function Home() {
   const handleLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
+
+    // Close this user's active World and group study records before signing out.
+    const { data: authData, error: userError } = await supabase.auth.getUser();
+    if (userError) console.error("Could not identify user before logout:", userError);
+
+    if (authData.user) {
+      const endedAt = new Date().toISOString();
+      const [globalResult, groupResult] = await Promise.all([
+        supabase
+          .from("global_study_sessions")
+          .update({ ended_at: endedAt })
+          .eq("user_id", authData.user.id)
+          .is("ended_at", null),
+        supabase
+          .from("study_sessions")
+          .update({ ended_at: endedAt })
+          .eq("user_id", authData.user.id)
+          .is("ended_at", null),
+      ]);
+
+      if (globalResult.error) console.error("Could not close World session on logout:", globalResult.error);
+      if (groupResult.error) console.error("Could not close group sessions on logout:", groupResult.error);
+    }
+
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Could not log out:", error);
@@ -1019,6 +1043,7 @@ export default function Home() {
           user_id: userId,
           started_at: startedAt,
           ended_at: null,
+          last_heartbeat_at: new Date().toISOString(),
         })))
         .select("id");
 
@@ -1096,6 +1121,7 @@ export default function Home() {
           subject_name: activeSubjectNameForSync,
           started_at: activeSessionStartedAt ?? new Date().toISOString(),
           ended_at: null,
+          last_heartbeat_at: new Date().toISOString(),
         });
 
       if (insertError) console.error("Could not publish global study session:", insertError);
@@ -1104,6 +1130,69 @@ export default function Home() {
     void syncGlobalStudySession();
     return () => { cancelled = true; };
   }, [activeSubject, activeSessionStartedAt, activeSubjectNameForSync, authReady]);
+
+  // Refresh the heartbeat while this focus timer is running.
+  // If the tab/browser closes or the device loses internet, these writes stop.
+  // A Supabase cron job (added by the SQL migration) closes rows that go stale.
+  useEffect(() => {
+    if (!authReady || activeSubject === null) return;
+
+    let disposed = false;
+    let heartbeatInFlight = false;
+
+    const sendHeartbeat = async () => {
+      if (disposed || heartbeatInFlight) return;
+      heartbeatInFlight = true;
+
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError || !authData.user || disposed) {
+          if (authError) console.error("Could not authenticate study heartbeat:", authError);
+          return;
+        }
+
+        const heartbeatAt = new Date().toISOString();
+        const userId = authData.user.id;
+
+        const [globalResult, groupResult] = await Promise.all([
+          supabase
+            .from("global_study_sessions")
+            .update({ last_heartbeat_at: heartbeatAt })
+            .eq("user_id", userId)
+            .is("ended_at", null),
+          supabase
+            .from("study_sessions")
+            .update({ last_heartbeat_at: heartbeatAt })
+            .eq("user_id", userId)
+            .is("ended_at", null),
+        ]);
+
+        if (globalResult.error) {
+          console.error("Could not send World session heartbeat:", globalResult.error);
+        }
+        if (groupResult.error) {
+          console.error("Could not send group session heartbeat:", groupResult.error);
+        }
+      } catch (heartbeatError) {
+        console.error("Study session heartbeat failed:", heartbeatError);
+      } finally {
+        heartbeatInFlight = false;
+      }
+    };
+
+    // Send one immediately, then every 30 seconds.
+    void sendHeartbeat();
+    const interval = window.setInterval(() => { void sendHeartbeat(); }, 30_000);
+    const handleOnline = () => { void sendHeartbeat(); };
+
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [authReady, activeSubject, activeSessionStartedAt]);
 
   // Load worldwide live activity and today's study sessions.
   useEffect(() => {
