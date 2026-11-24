@@ -6,10 +6,11 @@ import {
   MoreVertical, Pencil, Trash2, ChevronUp, ChevronDown, X,
   PanelRight, Check, ChevronLeft, ChevronRight,
   UserRound, LogOut, Globe2, Share2, Download, Sun, Moon, Contrast,
-  BarChart3, Activity, BookOpen, Coffee, Clock3, RefreshCw
+  BarChart3, Activity, BookOpen, Coffee, Clock3, RefreshCw, MessageSquare
 } from "lucide-react";
 import GroupsPanel from "@/components/groups/GroupsPanel";
 import LiveStudyRoom from "@/components/LiveStudyRoom";
+import CommunityPanel from "@/components/community/CommunityPanel";
 import { createClient } from "@/lib/supabase/client";
 
 type Subject = {
@@ -1843,6 +1844,23 @@ export default function Home() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {/* COMMUNITY */}
+          <button
+            type="button"
+            onClick={event => { event.stopPropagation(); setSelectedTab("Community"); }}
+            aria-label="Open community"
+            title="Community feedback and suggestions"
+            aria-pressed={selectedTab === "Community"}
+            className={`flex h-9 items-center gap-1.5 rounded-full border px-3 transition ${
+              selectedTab === "Community"
+                ? "border-[#FF7628]/60 bg-[#2b211b] text-[#FF9A5C]"
+                : "border-[#303030] bg-[#191919] text-[#cfcfcf] hover:border-[#FF7628]/60 hover:bg-[#242424] hover:text-white"
+            }`}
+          >
+            <MessageSquare size={14} className="text-[#FF7628]" />
+            <span className="text-[11px] font-medium">Community</span>
+          </button>
+
           {/* PERSONAL ANALYSIS */}
           <button
             type="button"
@@ -2727,6 +2745,9 @@ export default function Home() {
 
       {/* GROUPS */}
       {selectedTab === "Groups" && <GroupsPanel />}
+
+      {/* COMMUNITY */}
+      {selectedTab === "Community" && <CommunityPanel />}
 
       {/* SHARE STUDY CARD MODAL */}
       {shareOpen && (
