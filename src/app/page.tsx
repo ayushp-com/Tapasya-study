@@ -771,36 +771,69 @@ export default function Home() {
     catch (error) { console.error("Could not save appearance preference:", error); }
   }, [appTheme, themeReady]);
 
-  // Require an authenticated Supabase session before mounting the dashboard.
-  // Logged-out visitors are sent to the welcome / sign-in page.
+  // Enforce authentication AND completed onboarding before the dashboard mounts.
+  // A valid Google session alone is not enough: username, exam and age are required.
   useEffect(() => {
     let active = true;
 
-    const checkSession = async () => {
-      const { data, error } = await supabase.auth.getSession();
+    const checkSessionAndProfile = async () => {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (!active) return;
 
-      if (error || !data.session) {
+      if (sessionError || !sessionData.session) {
         window.location.replace("/auth");
+        return;
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (!active) return;
+
+      if (userError || !userData.user) {
+        window.location.replace("/auth");
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("username, exam, age")
+        .eq("id", userData.user.id)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (profileError) {
+        console.error("Dashboard profile verification failed:", profileError);
+        window.location.replace("/auth?error=profile");
+        return;
+      }
+
+      const hasUsername =
+        typeof profile?.username === "string" && profile.username.trim().length > 0;
+      const hasExam =
+        typeof profile?.exam === "string" && profile.exam.trim().length > 0;
+      const hasAge =
+        profile?.age !== null &&
+        profile?.age !== undefined &&
+        Number.isFinite(Number(profile.age));
+
+      if (!hasUsername || !hasExam || !hasAge) {
+        window.location.replace("/auth/setup");
         return;
       }
 
       setAuthReady(true);
     };
 
-    void checkSession();
+    void checkSessionAndProfile();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } = supabase.auth.onAuthStateChange((event) => {
       if (!active) return;
 
-      if (event === "SIGNED_OUT" || !session) {
+      if (event === "SIGNED_OUT") {
         window.location.replace("/auth");
-        return;
       }
-
-      setAuthReady(true);
     });
 
     return () => {
@@ -829,7 +862,11 @@ export default function Home() {
 
       if (cancelled) return;
       if (profileError) console.error("Could not load profile subjects:", profileError);
-      setProfileUsername(profile?.username || user.user_metadata?.username || "Student");
+      setProfileUsername(
+        typeof profile?.username === "string" && profile.username.trim()
+          ? profile.username.trim()
+          : "Student"
+      );
 
       try {
         const savedSubjectsRaw = localStorage.getItem("tapasya-subjects");
