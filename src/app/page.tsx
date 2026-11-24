@@ -711,6 +711,11 @@ export default function Home() {
   const [profileUsername, setProfileUsername] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [breakDialog, setBreakDialog] = useState<{ mode: "stop" | "logout" | "recovery"; startedAt: string | null } | null>(null);
+  const [selectedBreakReason, setSelectedBreakReason] = useState("Short break");
+  const [breakOtherText, setBreakOtherText] = useState("");
+  const [breakSaving, setBreakSaving] = useState(false);
+  const [logoutAfterBreak, setLogoutAfterBreak] = useState(false);
 
   // Share study card
   const [shareOpen, setShareOpen] = useState(false);
@@ -860,29 +865,20 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [authReady]);
 
-  const handleLogout = async () => {
+  const finishLogout = async (reason: string) => {
     if (loggingOut) return;
     setLoggingOut(true);
 
-    // Close this user's active World and group study records before signing out.
     const { data: authData, error: userError } = await supabase.auth.getUser();
     if (userError) console.error("Could not identify user before logout:", userError);
 
     if (authData.user) {
       const endedAt = new Date().toISOString();
+      const updates = { ended_at: endedAt, break_reason: reason, end_type: "logout" };
       const [globalResult, groupResult] = await Promise.all([
-        supabase
-          .from("global_study_sessions")
-          .update({ ended_at: endedAt })
-          .eq("user_id", authData.user.id)
-          .is("ended_at", null),
-        supabase
-          .from("study_sessions")
-          .update({ ended_at: endedAt })
-          .eq("user_id", authData.user.id)
-          .is("ended_at", null),
+        supabase.from("global_study_sessions").update(updates).eq("user_id", authData.user.id).is("ended_at", null),
+        supabase.from("study_sessions").update(updates).eq("user_id", authData.user.id).is("ended_at", null),
       ]);
-
       if (globalResult.error) console.error("Could not close World session on logout:", globalResult.error);
       if (groupResult.error) console.error("Could not close group sessions on logout:", groupResult.error);
     }
@@ -894,6 +890,53 @@ export default function Home() {
       return;
     }
     window.location.assign("/auth");
+  };
+
+  const handleLogout = () => {
+    if (loggingOut) return;
+    setProfileMenuOpen(false);
+    setSelectedBreakReason("Short break");
+    setBreakDialog({ mode: "logout", startedAt: activeSessionStartedAt });
+  };
+
+  const saveBreakReason = async () => {
+    if (!breakDialog || breakSaving) return;
+    setBreakSaving(true);
+    const reason = selectedBreakReason === "Other" && breakOtherText.trim()
+      ? `Other: ${breakOtherText.trim()}`
+      : selectedBreakReason;
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (authData.user) {
+        if (breakDialog.mode === "recovery" && breakDialog.startedAt) {
+          const [globalResult, groupResult] = await Promise.all([
+            supabase.from("global_study_sessions").update({ break_reason: reason }).eq("user_id", authData.user.id).eq("started_at", breakDialog.startedAt).eq("end_type", "unexpected"),
+            supabase.from("study_sessions").update({ break_reason: reason }).eq("user_id", authData.user.id).eq("started_at", breakDialog.startedAt).eq("end_type", "unexpected"),
+          ]);
+          if (globalResult.error) console.error("Could not save recovered World break reason:", globalResult.error);
+          if (groupResult.error) console.error("Could not save recovered group break reason:", groupResult.error);
+        } else if (breakDialog.mode === "stop" && breakDialog.startedAt) {
+          const [globalResult, groupResult] = await Promise.all([
+            supabase.from("global_study_sessions").update({ break_reason: reason, end_type: "manual" }).eq("user_id", authData.user.id).eq("started_at", breakDialog.startedAt),
+            supabase.from("study_sessions").update({ break_reason: reason, end_type: "manual" }).eq("user_id", authData.user.id).eq("started_at", breakDialog.startedAt),
+          ]);
+          if (globalResult.error) console.error("Could not save World break reason:", globalResult.error);
+          if (groupResult.error) console.error("Could not save group break reason:", groupResult.error);
+        }
+      }
+
+      const mode = breakDialog.mode;
+      setBreakDialog(null);
+      setBreakOtherText("");
+      if (mode === "logout") await finishLogout(reason);
+    } catch (error) {
+      console.error("Could not save break reason:", error);
+      // Keep the dialog open so the user can retry.
+    } finally {
+      setBreakSaving(false);
+    }
   };
 
   // Initialize dates and load saved data only on the client.
@@ -972,8 +1015,11 @@ export default function Home() {
   // One timestamp is shared by the dashboard timer, group sessions, World, and live presence.
   const toggleSubjectTimer = (subjectId: number) => {
     if (activeSubject === subjectId) {
+      const startedAt = activeSessionStartedAt;
       setActiveSubject(null);
       setActiveSessionStartedAt(null);
+      setSelectedBreakReason("Short break");
+      setBreakDialog({ mode: "stop", startedAt });
       return;
     }
 
@@ -1193,6 +1239,35 @@ export default function Home() {
       window.removeEventListener("online", handleOnline);
     };
   }, [authReady, activeSubject, activeSessionStartedAt]);
+
+  // Ask for the reason when a previous session was closed by heartbeat cleanup.
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    const checkUnexpectedSession = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user || cancelled) return;
+      const { data, error } = await supabase
+        .from("global_study_sessions")
+        .select("started_at, ended_at, end_type, break_reason")
+        .eq("user_id", authData.user.id)
+        .eq("end_type", "unexpected")
+        .is("break_reason", null)
+        .order("ended_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        console.error("Could not check for an interrupted session:", error);
+        return;
+      }
+      if (!cancelled && data?.started_at) {
+        setSelectedBreakReason("Short break");
+        setBreakDialog(current => current ?? { mode: "recovery", startedAt: data.started_at });
+      }
+    };
+    void checkUnexpectedSession();
+    return () => { cancelled = true; };
+  }, [authReady]);
 
   // Load worldwide live activity and today's study sessions.
   useEffect(() => {
@@ -1740,6 +1815,46 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {breakDialog && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="break-dialog-title" className="w-full max-w-[440px] rounded-2xl border border-[#343434] bg-[#171717] p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#FF7628]">Tapasya · Break tracking</p>
+                <h2 id="break-dialog-title" className="mt-2 text-lg font-semibold text-white">
+                  {breakDialog.mode === "recovery" ? "What happened during your last session?" : "Why are you taking a break?"}
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-[#929292]">This helps build more useful study and break insights. Your answer is used for your personal activity analytics.</p>
+              </div>
+              {breakDialog.mode === "recovery" && (
+                <button type="button" onClick={() => setBreakDialog(null)} aria-label="Skip for now" className="rounded-lg p-1 text-[#888] hover:bg-[#292929] hover:text-white"><X size={18} /></button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ["☕", "Short break"], ["🚻", "Washroom"], ["🍽️", "Food / Meal"],
+                ["😴", "Sleep / Rest"], ["📱", "Phone / Social media"], ["🚶", "Walking"],
+                ["🧠", "Mental refresh"], ["📚", "Subject completed"],
+                ["🏠", "Personal work"], ["❓", "Other"],
+              ].map(([emoji, label]) => (
+                <button key={label} type="button" onClick={() => setSelectedBreakReason(label)} aria-pressed={selectedBreakReason === label}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-xs transition ${selectedBreakReason === label ? "border-[#FF7628] bg-[#FF7628]/10 text-[#ffad7a]" : "border-[#333] bg-[#202020] text-[#d0d0d0] hover:border-[#555]"}`}>
+                  <span className="text-base">{emoji}</span><span>{label}</span>
+                </button>
+              ))}
+            </div>
+            {selectedBreakReason === "Other" && (
+              <input value={breakOtherText} onChange={event => setBreakOtherText(event.target.value)} maxLength={80} placeholder="Tell us briefly (optional)" className="mt-3 h-10 w-full rounded-lg border border-[#383838] bg-[#101010] px-3 text-sm text-white outline-none focus:border-[#FF7628]" />
+            )}
+            <button type="button" onClick={() => void saveBreakReason()} disabled={breakSaving || (selectedBreakReason === "Other" && !breakOtherText.trim())}
+              className="mt-4 flex h-11 w-full items-center justify-center rounded-xl bg-[#FF7628] text-sm font-semibold text-black transition hover:bg-[#ff8b49] disabled:cursor-wait disabled:opacity-60">
+              {breakSaving ? "Saving..." : breakDialog.mode === "logout" ? "Save & log out" : "Save reason"}
+            </button>
+            {breakDialog.mode === "recovery" && <button type="button" onClick={() => setBreakDialog(null)} className="mt-2 h-9 w-full text-xs text-[#888] hover:text-white">Skip for now</button>}
+          </section>
+        </div>
+      )}
 
       {/* TIMER PAGE */}
       {selectedTab === "Timer" && (
