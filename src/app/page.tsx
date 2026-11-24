@@ -586,7 +586,7 @@ function drawShareCard(input: ShareCardInput): HTMLCanvasElement | null {
 
   ctx.fillStyle = "#8a8a8a";
   ctx.font = `500 32px ${SANS}`;
-  ctx.fillText("of focused study today", W / 2, 1112);
+  ctx.fillText("total focused study time", W / 2, 1112);
 
   // ---------- stat chips ----------
   const totalTargetSeconds = subjects.reduce((sum, s) => sum + (s.targetHours || 0) * 3600, 0);
@@ -2005,7 +2005,7 @@ export default function Home() {
                     </div>
                     <section className="mx-3 mb-2 flex min-h-[94px] items-center justify-between rounded-xl bg-[#151515] px-4 py-3">
                       <div>
-                        <p className="text-[11px] font-medium text-[#cccccc]">Current focus time</p>
+                        <p className="text-[11px] font-medium text-[#cccccc]">Total focus time</p>
                         <p className="mt-1 font-mono text-[32px] font-semibold leading-none tracking-tight text-[#e6e6e6]">{formatTime(totalSeconds)}</p>
                       </div>
                       <div className="text-right">
