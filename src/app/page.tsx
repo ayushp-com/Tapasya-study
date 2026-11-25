@@ -2535,20 +2535,6 @@ export default function Home() {
         const todayActivity = buildStudentActivity(todaySessions);
         const yesterdayActivity = buildStudentActivity(yesterdaySessions);
 
-        // Stable, date-seeded sample activity for a clearly disclosed mixed activity feed.
-        const nowLocal = new Date();
-        const dayKey = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,"0")}-${String(nowLocal.getDate()).padStart(2,"0")}`;
-        const hashSeed = (value: string) => { let hash = 2166136261; for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619); return hash >>> 0; };
-        const dailyRandom = (name: string, salt: string) => { let x = hashSeed(`${dayKey}:${name}:${salt}`); x = (x ^ (x >>> 16)) * 0x45d9f3b; x = (x ^ (x >>> 16)) * 0x45d9f3b; x ^= x >>> 16; return (x >>> 0) / 4294967295; };
-        const sampleNames = ["riya.notes", "ananya.study", "mehakfocus", "sana.reads", "aashi_07", "kavya.learns", "isha.focus", "priya.pages", "simran.study", "arjunprep", "dev.studylog", "kabirfocus", "rohan.notes", "vivaanlearn", "aditya.study"];
-        const sampleSubjects = ["Mathematics", "Physics", "History", "Biology", "Economics", "Computer Science", "Literature", "Chemistry"];
-        const sampleActivity = sampleNames.map((username, index) => {
-          const isStudying = dailyRandom(username, "live-status") > 0.67;
-          const liveElapsedSeconds = Math.floor(dailyRandom(username, "live-start") * 3 * 3600);
-          return { user_id: `sample-${username}`, username, totalSeconds: Math.floor((6 + dailyRandom(username, "hours") * 6) * 3600), isStudying, latestStartedAt: nowLocal.getTime() - liveElapsedSeconds * 1000, latestSubject: sampleSubjects[Math.floor(dailyRandom(username, "subject") * sampleSubjects.length)] };
-        }).sort((a, b) => Number(b.isStudying) - Number(a.isStudying) || b.totalSeconds - a.totalSeconds);
-        const todayDisplayActivity = [...todayActivity, ...sampleActivity].sort((a, b) => Number(b.isStudying) - Number(a.isStudying) || b.latestStartedAt - a.latestStartedAt);
-
         const renderActivityGroup = (
           title: string,
           subtitle: string,
@@ -2609,12 +2595,30 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Studying right now</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{liveSessions.length.toLocaleString()}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Active focus sessions</p>
+              </div>
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Study time today</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{formatTime(todaySeconds)}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Combined recorded time</p>
+              </div>
+              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
+                <p className="text-[11px] text-[#888888]">Students active today</p>
+                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{uniqueStudentsToday.toLocaleString()}</p>
+                <p className="mt-1 text-[10px] text-[#666666]">Unique students with a session</p>
+              </div>
+            </div>
+
             {worldLoading && worldSessions.length === 0 ? (
-              <div className="mt-5 rounded-xl border border-[#292929] bg-[#151515] px-5 py-14 text-center text-[12px] text-[#777777]">
+              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-14 text-center text-[12px] text-[#777777]">
                 Loading worldwide activity…
               </div>
             ) : worldError ? (
-              <div className="mt-5 rounded-xl border border-[#292929] bg-[#151515] px-5 py-12 text-center">
+              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-12 text-center">
                 <p className="text-[12px] text-[#e6a07b]">{worldError}</p>
                 <p className="mx-auto mt-2 max-w-[600px] text-[10px] leading-5 text-[#777777]">
                   Run the accompanying global-study-sessions.sql migration in Supabase, then refresh this page.
@@ -2657,8 +2661,8 @@ export default function Home() {
                 {worldActivityPeriod === "today"
                   ? renderActivityGroup(
                       "Students who studied today",
-                      "Recorded activity · includes sample profiles",
-                      todayDisplayActivity,
+                      "Everyone who has logged a study session today",
+                      todayActivity,
                       "No study sessions yet today."
                     )
                   : renderActivityGroup(
@@ -2669,8 +2673,6 @@ export default function Home() {
                     )}
               </div>
             )}
-
-
 
             <p className="mt-4 text-[10px] leading-5 text-[#666666]">
               Your study activity is shared on this page while your timer is running. Only your username, subject and session duration are displayed.
