@@ -2609,30 +2609,12 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
-                <p className="text-[11px] text-[#888888]">Studying right now</p>
-                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{liveSessions.length.toLocaleString()}</p>
-                <p className="mt-1 text-[10px] text-[#666666]">Active focus sessions</p>
-              </div>
-              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
-                <p className="text-[11px] text-[#888888]">Study time today</p>
-                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{formatTime(todaySeconds)}</p>
-                <p className="mt-1 text-[10px] text-[#666666]">Combined recorded time</p>
-              </div>
-              <div className="rounded-xl border border-[#292929] bg-[#171717] p-5">
-                <p className="text-[11px] text-[#888888]">Students active today</p>
-                <p className="mt-2 font-mono text-[32px] font-semibold tracking-tight text-white">{uniqueStudentsToday.toLocaleString()}</p>
-                <p className="mt-1 text-[10px] text-[#666666]">Unique students with a session</p>
-              </div>
-            </div>
-
             {worldLoading && worldSessions.length === 0 ? (
-              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-14 text-center text-[12px] text-[#777777]">
+              <div className="mt-5 rounded-xl border border-[#292929] bg-[#151515] px-5 py-14 text-center text-[12px] text-[#777777]">
                 Loading worldwide activity…
               </div>
             ) : worldError ? (
-              <div className="mt-8 rounded-xl border border-[#292929] bg-[#151515] px-5 py-12 text-center">
+              <div className="mt-5 rounded-xl border border-[#292929] bg-[#151515] px-5 py-12 text-center">
                 <p className="text-[12px] text-[#e6a07b]">{worldError}</p>
                 <p className="mx-auto mt-2 max-w-[600px] text-[10px] leading-5 text-[#777777]">
                   Run the accompanying global-study-sessions.sql migration in Supabase, then refresh this page.
