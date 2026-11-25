@@ -2674,6 +2674,29 @@ export default function Home() {
               </div>
             )}
 
+            {/* DEMO ACTIVITY: fictional profiles, separate from real Supabase metrics */}
+            {(() => {
+              const nowLocal = new Date();
+              const dayKey = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,"0")}-${String(nowLocal.getDate()).padStart(2,"0")}`;
+              const hashSeed = (value: string) => { let hash = 2166136261; for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619); return hash >>> 0; };
+              const dailyRandom = (name: string, salt: string) => { let x = hashSeed(`${dayKey}:${name}:${salt}`); x = (x ^ (x >>> 16)) * 0x45d9f3b; x = (x ^ (x >>> 16)) * 0x45d9f3b; x ^= x >>> 16; return (x >>> 0) / 4294967295; };
+              const demoNames = ["riya.notes", "ananya.study", "mehakfocus", "sana.reads", "aashi_07", "kavya.learns", "isha.focus", "priya.pages", "simran.study", "arjunprep", "dev.studylog", "kabirfocus", "rohan.notes", "vivaanlearn", "aditya.study"];
+              const demoSubjects = ["Mathematics", "Physics", "History", "Biology", "Economics", "Computer Science", "Literature", "Chemistry"];
+              const demoStudents = demoNames.map((username, index) => {
+                const isSimulatedLive = dailyRandom(username, "live-status") > 0.67;
+                const liveStartedSecondsAgo = Math.floor(dailyRandom(username, "live-start") * 3 * 3600);
+                return { username, gender: index < 9 ? "girl" : "boy", totalSeconds: Math.floor((6 + dailyRandom(username, "hours") * 6) * 3600), subject: demoSubjects[Math.floor(dailyRandom(username, "subject") * demoSubjects.length)], isSimulatedLive, liveElapsedSeconds: liveStartedSecondsAgo };
+              }).sort((a, b) => Number(b.isSimulatedLive) - Number(a.isSimulatedLive) || b.totalSeconds - a.totalSeconds);
+              const demoLiveCount = demoStudents.filter(student => student.isSimulatedLive).length;
+              return (
+                <div className="mt-6 overflow-hidden rounded-xl border border-[#292929] bg-[#151515]">
+                  <div className="border-b border-[#292929] px-4 py-4 sm:px-5 flex items-center justify-between gap-3"><div><h2 className="text-[13px] font-semibold text-[#eeeeee]">Demo students</h2><p className="mt-1 text-[10px] text-[#858585]">Fictional sample profiles · hours vary daily</p></div><span className="rounded-full bg-[#242424] px-2.5 py-1 text-[10px] text-[#bdbdbd]">15 profiles</span></div>
+                  <div className="border-b border-[#252525] px-4 py-3 sm:px-5"><p className="text-[10px] text-[#858585]">{demoLiveCount} simulated students studying right now</p></div>
+                  <div className="divide-y divide-[#252525]">{demoStudents.map((student) => (<div key={student.username} className="flex items-center gap-3 px-4 py-3.5 sm:px-5"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${student.gender === "girl" ? "bg-[#34242f] text-[#e7a3d0]" : "bg-[#252c36] text-[#9dbbe8]"} text-[12px] font-semibold`}>{student.username.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[12px] font-semibold text-[#e5e5e5]">@{student.username}</p>{student.isSimulatedLive && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#173326] px-2 py-0.5 text-[9px] text-[#61d394]"><span className="h-1.5 w-1.5 rounded-full bg-[#61d394]"/>LIVE</span>}</div><p className="mt-1 truncate text-[10px] text-[#858585]">{student.subject}{student.isSimulatedLive ? " · studying now" : ""}</p></div><div className="shrink-0 text-right"><p className="font-mono text-[12px] tabular-nums text-[#FF7628]">{formatTime(student.totalSeconds)}</p>{student.isSimulatedLive ? <p className="mt-1 font-mono text-[9px] tabular-nums text-[#61d394]">LIVE · {formatTime(student.liveElapsedSeconds)}</p> : <p className="mt-1 text-[9px] text-[#777777]">SAMPLE · STUDIED</p>}</div></div>))}</div>
+                </div>
+              );
+            })()}
+
             <p className="mt-4 text-[10px] leading-5 text-[#666666]">
               Your study activity is shared on this page while your timer is running. Only your username, subject and session duration are displayed.
             </p>
